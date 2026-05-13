@@ -150,6 +150,15 @@ func (s *UploadService) SaveChunk(ctx context.Context, uploadID string, chunkInd
 	return err
 }
 
+func (s *UploadService) CancelUpload(ctx context.Context, uploadID string) error {
+	if err := validateUploadID(uploadID); err != nil {
+		return err
+	}
+
+	tempDir := s.storage.TempChunkDir(uploadID)
+	return os.RemoveAll(tempDir)
+}
+
 func (s *UploadService) GetProgress(ctx context.Context, uploadID string) ([]int, error) {
 	if err := validateUploadID(uploadID); err != nil {
 		return nil, err

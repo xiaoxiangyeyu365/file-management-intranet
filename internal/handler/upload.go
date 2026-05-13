@@ -84,9 +84,11 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 func (h *UploadHandler) CancelUpload(c *gin.Context) {
 	uploadID := c.Param("uploadID")
 
-	// Delete temp directory
-	// The temp directory will be cleaned up by the storage manager or on complete
-	// For now, just return success - the temp files will expire
+	err := h.uploadService.CancelUpload(c.Request.Context(), uploadID)
+	if err != nil {
+		response.Error(c, 400, err.Error())
+		return
+	}
 
 	response.Success(c, nil)
 }
