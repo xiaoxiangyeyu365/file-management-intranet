@@ -175,7 +175,7 @@ func (r *FileRepository) IsAncestor(ctx context.Context, fileID, targetID int64)
 	`
 
 	var count int64
-	err := r.db.WithContext(ctx).Raw(query, targetID, fileID).Scan(&count).Error
+	err := r.db.WithContext(ctx).Raw(query, fileID, targetID).Scan(&count).Error
 	return count > 0, err
 }
 
