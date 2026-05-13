@@ -37,11 +37,15 @@ func (h *UploadHandler) InitUpload(c *gin.Context) {
 
 func (h *UploadHandler) UploadChunk(c *gin.Context) {
 	uploadID := c.Param("uploadID")
-	chunkIndex, _ := strconv.Atoi(c.Param("index"))
+	chunkIndex, err := strconv.Atoi(c.Param("index"))
+	if err != nil || chunkIndex < 0 {
+		response.BadRequest(c, "invalid chunk index")
+		return
+	}
 
-	err := h.uploadService.SaveChunk(c.Request.Context(), uploadID, chunkIndex, c.Request.Body)
+	err = h.uploadService.SaveChunk(c.Request.Context(), uploadID, chunkIndex, c.Request.Body)
 	if err != nil {
-		response.Error(c, 400, "failed to save chunk")
+		response.Error(c, 400, err.Error())
 		return
 	}
 
@@ -53,6 +57,10 @@ func (h *UploadHandler) GetProgress(c *gin.Context) {
 
 	chunks, err := h.uploadService.GetProgress(c.Request.Context(), uploadID)
 	if err != nil {
+		if err == service.ErrUploadNotFound {
+			response.NotFound(c, "upload not found")
+			return
+		}
 		response.Error(c, 400, err.Error())
 		return
 	}
@@ -74,6 +82,14 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 
 	file, err := h.uploadService.CompleteUpload(c.Request.Context(), userID, uploadID, req)
 	if err != nil {
+		if err == service.ErrUploadNotFound {
+			response.NotFound(c, "upload not found")
+			return
+		}
+		if err == service.ErrChunkNotFound {
+			response.Error(c, 400, "missing chunks")
+			return
+		}
 		response.Error(c, 400, err.Error())
 		return
 	}
@@ -86,6 +102,10 @@ func (h *UploadHandler) CancelUpload(c *gin.Context) {
 
 	err := h.uploadService.CancelUpload(c.Request.Context(), uploadID)
 	if err != nil {
+		if err == service.ErrUploadNotFound {
+			response.NotFound(c, "upload not found")
+			return
+		}
 		response.Error(c, 400, err.Error())
 		return
 	}
