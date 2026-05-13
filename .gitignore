@@ -1,0 +1,8 @@
+
+# Build artifacts
+cloudbox.exe
+cloudbox
+
+# Runtime data
+data/
+
