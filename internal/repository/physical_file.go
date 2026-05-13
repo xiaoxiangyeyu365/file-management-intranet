@@ -77,3 +77,7 @@ func (r *PhysicalFileRepository) UpdateThumbnail(ctx context.Context, id int64, 
 func (r *PhysicalFileRepository) Delete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).Delete(&model.PhysicalFile{}, id).Error
 }
+
+func (r *PhysicalFileRepository) Update(ctx context.Context, pf *model.PhysicalFile) error {
+	return r.db.WithContext(ctx).Save(pf).Error
+}
