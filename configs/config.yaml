@@ -1,0 +1,87 @@
+server:
+  host: "0.0.0.0"
+  port: 80
+
+database:
+  type: "mysql"
+  host: "localhost"
+  port: 3306
+  username: "root"
+  password: "1234"
+  name: "cloudbox"
+
+storage:
+  root: "./data/files"
+  temp: "./data/temp"
+  thumbnails: "./data/thumbnails"
+
+upload:
+  chunk_size: 5242880
+  max_concurrent: 3
+  temp_expire: 24h
+
+jwt:
+  secret: "change-this-in-production"
+  expire: 24h
+
+log:
+  level: "info"
+  file: "./data/logs/cloudbox.log"
+
+admin:
+  username: "admin"
+  password: "admin123"
+
+auth:
+  registration: true        # 是否允许公开注册
+  approval_required: true   # 公开注册是否需要管理员审批
+
+share:
+  secret: ""
+  token_length: 8
+  credential_ttl: 300
+
+disk:
+  default_quota: 10737418240  # 10GB
+
+tls:
+  enabled: true
+  port: 8443               # HTTPS port (8443 avoids Linux privileged port; use 443 with root/setcap)
+  cert: "./data/tls/server.crt"
+  key: "./data/tls/server.key"
+  ca_cert: "./data/tls/ca.crt"
+  hosts:                    # Server IP(s) written into certificate SAN
+    - "10.242.241.92"
+
+ai:
+  enabled: true
+  base_url: "https://api.deepseek.com"
+  api_key: ""                               # read from env AI_API_KEY if empty
+  model: "deepseek-v4-flash"
+  vision_model: "deepseek-v4-flash"                           # falls back to model if empty
+  max_content_length: 50000
+  max_concurrent: 2
+  auto_document: true
+  auto_image: false
+  auto_video: false
+  timeout: 30
+  summary_prompt: "请用中文为以下文档内容生成一段简洁摘要（不超过200字）和5个关键标签。格式：\n摘要：...\n标签：标签1,标签2,标签3,标签4,标签5"
+
+rag:
+  enabled: false
+  embedding_base_url: "https://api.deepseek.com"
+  embedding_api_key: ""
+  embedding_model: "text-embedding-v3"
+  embedding_dimensions: 1024
+  chunk_min_size: 100
+  chunk_max_size: 500
+  chunk_overlap: 50
+  embedding_batch_size: 20
+  max_concurrent: 2
+  top_k: 5
+  max_history: 10
+  timeout: 30
+  chat_model: ""
+  chat_base_url: ""
+  chat_api_key: ""
+  system_prompt: "你是一个文档助手。基于提供的上下文内容回答用户问题。如果上下文中没有相关信息，请明确说明。"
