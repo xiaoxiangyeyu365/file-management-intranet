@@ -74,26 +74,27 @@ func (h *FileHandler) LookupFile(c *gin.Context) {
 	parentIDStr := c.Query("parentId")
 	name := c.Query("name")
 
+	if name == "" {
+		response.BadRequest(c, "name parameter is required")
+		return
+	}
+
 	var parentID int64
 	if parentIDStr != "" {
 		parentID, _ = strconv.ParseInt(parentIDStr, 10, 64)
 	}
 
-	files, err := h.fileService.ListFiles(c.Request.Context(), userID, parentID)
+	file, err := h.fileService.FindByName(c.Request.Context(), userID, parentID, name)
 	if err != nil {
+		if err == service.ErrFileNotFound {
+			response.NotFound(c, "file not found")
+			return
+		}
 		response.InternalError(c, "failed to lookup file")
 		return
 	}
 
-	// Find by name
-	for _, f := range files {
-		if f.Name == name {
-			response.Success(c, f)
-			return
-		}
-	}
-
-	response.NotFound(c, "file not found")
+	response.Success(c, file)
 }
 
 func (h *FileHandler) CreateFolder(c *gin.Context) {

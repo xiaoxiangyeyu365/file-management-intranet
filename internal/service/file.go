@@ -47,6 +47,17 @@ func (s *FileService) ListFiles(ctx context.Context, userID, folderID int64) ([]
 	return s.fileRepo.FindByParentAndOwner(ctx, folderID, userID, false)
 }
 
+func (s *FileService) FindByName(ctx context.Context, userID, parentID int64, name string) (*model.File, error) {
+	file, err := s.fileRepo.FindByNameAndParent(ctx, userID, parentID, name)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to find file by name: %w", err)
+	}
+	return file, nil
+}
+
 func (s *FileService) GetFile(ctx context.Context, userID, fileID int64) (*model.File, error) {
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
