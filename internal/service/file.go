@@ -9,9 +9,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 var (
@@ -40,11 +43,6 @@ func NewFileService(
 	}
 }
 
-type FileInfo struct {
-	*model.File
-	Physical *model.PhysicalFile `json:"physical,omitempty"`
-}
-
 func (s *FileService) ListFiles(ctx context.Context, userID, folderID int64) ([]model.File, error) {
 	return s.fileRepo.FindByParentAndOwner(ctx, folderID, userID, false)
 }
@@ -52,7 +50,10 @@ func (s *FileService) ListFiles(ctx context.Context, userID, folderID int64) ([]
 func (s *FileService) GetFile(ctx context.Context, userID, fileID int64) (*model.File, error) {
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
-		return nil, ErrFileNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrFileNotFound
+		}
+		return nil, fmt.Errorf("failed to get file: %w", err)
 	}
 	return file, nil
 }
@@ -82,7 +83,10 @@ func (s *FileService) CreateFolder(ctx context.Context, userID, parentID int64, 
 func (s *FileService) Rename(ctx context.Context, userID, fileID int64, newName string) error {
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
-		return ErrFileNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to find file for rename: %w", err)
 	}
 
 	// Check name conflict (exclude self)
@@ -104,7 +108,10 @@ func (s *FileService) Rename(ctx context.Context, userID, fileID int64, newName 
 func (s *FileService) MoveToTrash(ctx context.Context, userID, fileID int64) error {
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
-		return ErrFileNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to find file for trash: %w", err)
 	}
 
 	return s.fileRepo.SoftDelete(ctx, file.ID)
@@ -146,7 +153,10 @@ func (s *FileService) ListTrash(ctx context.Context, userID int64) ([]model.File
 func (s *FileService) RestoreFile(ctx context.Context, userID, fileID int64) error {
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
-		return ErrFileNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to find file for restore: %w", err)
 	}
 
 	var newParentID *int64
@@ -181,9 +191,16 @@ func (s *FileService) RestoreFile(ctx context.Context, userID, fileID int64) err
 }
 
 func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64) error {
+	// TODO: Wrap all operations in a database transaction for atomicity.
+	// The current repository pattern doesn't expose transactions. Consider adding
+	// a BeginTx method or using a transaction callback pattern.
+
 	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 	if err != nil {
-		return ErrFileNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to find file for permanent delete: %w", err)
 	}
 
 	// Get all descendants
@@ -214,26 +231,34 @@ func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64)
 	for pid, count := range physicalRefCount {
 		newRefCount, err := s.physicalRepo.DecrementRefCount(ctx, pid, count)
 		if err != nil {
-			continue // Log error but don't fail
+			log.Printf("warning: failed to decrement ref count for physical file %d: %v", pid, err)
+			continue
 		}
 
 		if newRefCount <= 0 {
 			pf, err := s.physicalRepo.FindByID(ctx, pid)
 			if err != nil {
+				log.Printf("warning: failed to find physical file %d: %v", pid, err)
 				continue
 			}
 
 			// Delete physical file
 			absPath := s.storage.ToAbsPath(pf.StoragePath)
-			os.Remove(absPath)
+			if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: failed to delete physical file %s: %v", absPath, err)
+			}
 
 			// Delete thumbnail
 			if pf.ThumbnailPath != "" {
-				os.Remove(pf.ThumbnailPath)
+				if err := os.Remove(pf.ThumbnailPath); err != nil && !os.IsNotExist(err) {
+					log.Printf("warning: failed to delete thumbnail %s: %v", pf.ThumbnailPath, err)
+				}
 			}
 
 			// Delete physical file record
-			s.physicalRepo.Delete(ctx, pid)
+			if err := s.physicalRepo.Delete(ctx, pid); err != nil {
+				log.Printf("warning: failed to delete physical file record %d: %v", pid, err)
+			}
 		}
 	}
 
