@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,14 @@ func validateMD5(md5 string) error {
 		}
 	}
 	return nil
+}
+
+func validateUploadID(uploadID string) error {
+	parts := strings.Split(uploadID, "_")
+	if len(parts) != 2 {
+		return errors.New("invalid uploadID format")
+	}
+	return validateMD5(parts[0])
 }
 
 type UploadService struct {
@@ -122,6 +131,9 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 }
 
 func (s *UploadService) SaveChunk(ctx context.Context, uploadID string, chunkIndex int, reader io.Reader) error {
+	if err := validateUploadID(uploadID); err != nil {
+		return err
+	}
 	tempDir := s.storage.TempChunkDir(uploadID)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return err
@@ -139,6 +151,9 @@ func (s *UploadService) SaveChunk(ctx context.Context, uploadID string, chunkInd
 }
 
 func (s *UploadService) GetProgress(ctx context.Context, uploadID string) ([]int, error) {
+	if err := validateUploadID(uploadID); err != nil {
+		return nil, err
+	}
 	tempDir := s.storage.TempChunkDir(uploadID)
 
 	chunks := []int{}
@@ -165,6 +180,9 @@ type CompleteUploadRequest struct {
 }
 
 func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, uploadID string, req CompleteUploadRequest) (*model.File, error) {
+	if err := validateUploadID(uploadID); err != nil {
+		return nil, err
+	}
 	tempDir := s.storage.TempChunkDir(uploadID)
 	defer os.RemoveAll(tempDir)
 
