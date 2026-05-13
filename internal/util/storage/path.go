@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -14,18 +15,26 @@ type StorageManager struct {
 	thumbnailDir string
 }
 
-var storageManager *StorageManager
+var (
+	storageManager *StorageManager
+	storageOnce    sync.Once
+)
 
 func InitStorage(cfg *config.Config) *StorageManager {
-	storageManager = &StorageManager{
-		rootDir:      cfg.Storage.Root,
-		tempDir:      cfg.Storage.Temp,
-		thumbnailDir: cfg.Storage.Thumbnails,
-	}
+	storageOnce.Do(func() {
+		storageManager = &StorageManager{
+			rootDir:      cfg.Storage.Root,
+			tempDir:      cfg.Storage.Temp,
+			thumbnailDir: cfg.Storage.Thumbnails,
+		}
+	})
 	return storageManager
 }
 
 func GetStorage() *StorageManager {
+	if storageManager == nil {
+		panic("storage manager not initialized - call InitStorage first")
+	}
 	return storageManager
 }
 

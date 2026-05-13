@@ -3,6 +3,7 @@ package crypto
 import (
 	"cloudbox/internal/config"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -36,6 +37,9 @@ func ParseToken(tokenString string) (*Claims, error) {
 	cfg := config.Get()
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(cfg.JWT.Secret), nil
 	})
 
