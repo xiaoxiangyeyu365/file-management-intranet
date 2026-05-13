@@ -23,6 +23,18 @@ var (
 	ErrInvalidChunk   = errors.New("invalid chunk")
 )
 
+func validateMD5(md5 string) error {
+	if len(md5) != 32 {
+		return errors.New("invalid MD5 format")
+	}
+	for _, c := range md5 {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return errors.New("invalid MD5 format")
+		}
+	}
+	return nil
+}
+
 type UploadService struct {
 	fileRepo     *repository.FileRepository
 	physicalRepo *repository.PhysicalFileRepository
@@ -60,6 +72,11 @@ type InitUploadResponse struct {
 }
 
 func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUploadRequest) (*InitUploadResponse, error) {
+	// Validate MD5 format
+	if err := validateMD5(req.MD5); err != nil {
+		return nil, err
+	}
+
 	// Check for instant upload
 	pf, err := s.physicalRepo.FindByMD5(ctx, req.MD5)
 	if err == nil {
@@ -70,7 +87,9 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 		}
 
 		// Increment ref count
-		s.physicalRepo.IncrementRefCount(ctx, pf.ID)
+		if err := s.physicalRepo.IncrementRefCount(ctx, pf.ID); err != nil {
+			return nil, fmt.Errorf("failed to increment ref count: %w", err)
+		}
 
 		return &InitUploadResponse{
 			Instant: true,
@@ -214,11 +233,15 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 	// Move merged file to final location
 	if err := os.Rename(mergedPath, absolute); err != nil {
 		// Fallback: copy
-		copyFile(mergedPath, absolute)
+		if copyErr := copyFile(mergedPath, absolute); copyErr != nil {
+			return nil, fmt.Errorf("failed to move/copy file: %w", copyErr)
+		}
 	}
 
 	// Update physical file with storage path
-	s.physicalRepo.Update(ctx, pf)
+	if err := s.physicalRepo.Update(ctx, pf); err != nil {
+		return nil, fmt.Errorf("failed to update physical file: %w", err)
+	}
 
 	// Create file record
 	file, err := s.createFileRecord(ctx, userID, req.FileName, req.TargetFolderID, pf)
