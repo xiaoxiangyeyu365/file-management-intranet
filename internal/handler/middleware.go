@@ -38,17 +38,32 @@ func JWTMiddleware() gin.HandlerFunc {
 	}
 }
 
+// GetUserID retrieves the authenticated user's ID from context.
+// Panics if called on a route without JWTMiddleware.
 func GetUserID(c *gin.Context) int64 {
-	userID, _ := c.Get("userID")
+	userID, exists := c.Get("userID")
+	if !exists {
+		panic("GetUserID called on unauthenticated route - missing JWTMiddleware")
+	}
 	return userID.(int64)
 }
 
+// GetUsername retrieves the authenticated username from context.
+// Panics if called on a route without JWTMiddleware.
 func GetUsername(c *gin.Context) string {
-	username, _ := c.Get("username")
+	username, exists := c.Get("username")
+	if !exists {
+		panic("GetUsername called on unauthenticated route - missing JWTMiddleware")
+	}
 	return username.(string)
 }
 
+// GetRole retrieves the authenticated user's role from context.
+// Panics if called on a route without JWTMiddleware.
 func GetRole(c *gin.Context) string {
-	role, _ := c.Get("role")
+	role, exists := c.Get("role")
+	if !exists {
+		panic("GetRole called on unauthenticated route - missing JWTMiddleware")
+	}
 	return role.(string)
 }
