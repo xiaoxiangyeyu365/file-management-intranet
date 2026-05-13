@@ -62,8 +62,8 @@ func main() {
 
 			// Files
 			protected.GET("/files", fileHandler.ListFiles)
-			protected.GET("/files/:id", fileHandler.GetFile)
 			protected.GET("/files/lookup", fileHandler.LookupFile)
+			protected.GET("/files/:id", fileHandler.GetFile)
 			protected.PUT("/files/:id", fileHandler.RenameFile)
 			protected.DELETE("/files/:id", fileHandler.DeleteFile)
 			protected.PATCH("/files/move", fileHandler.MoveFiles)
