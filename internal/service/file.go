@@ -120,7 +120,13 @@ func (s *FileService) MoveToTrash(ctx context.Context, userID, fileID int64) err
 func (s *FileService) MoveFiles(ctx context.Context, userID int64, fileIDs []int64, targetFolderID int64) error {
 	// Validate target folder
 	target, err := s.fileRepo.FindByIDAndOwner(ctx, targetFolderID, userID)
-	if err != nil || !target.IsFolder || target.DeletedAt.Valid {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInvalidTarget
+		}
+		return fmt.Errorf("failed to find target folder: %w", err)
+	}
+	if !target.IsFolder || target.DeletedAt.Valid {
 		return ErrInvalidTarget
 	}
 
@@ -128,12 +134,19 @@ func (s *FileService) MoveFiles(ctx context.Context, userID int64, fileIDs []int
 	for _, fileID := range fileIDs {
 		file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
 		if err != nil {
-			return ErrFileNotFound
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrFileNotFound
+			}
+			return fmt.Errorf("failed to find file: %w", err)
 		}
 
 		// Check circular reference
 		isAncestor, err := s.fileRepo.IsAncestor(ctx, fileID, targetFolderID)
-		if err != nil || isAncestor {
+		if err != nil {
+			log.Printf("failed to check circular reference: %v", err)
+			return fmt.Errorf("failed to check circular reference: %w", err)
+		}
+		if isAncestor {
 			return ErrCircularReference
 		}
 
@@ -165,8 +178,14 @@ func (s *FileService) RestoreFile(ctx context.Context, userID, fileID int64) err
 	// Check if original parent exists
 	if file.ParentID.Valid {
 		parent, err := s.fileRepo.FindByID(ctx, file.ParentID.Int64)
-		if err != nil || parent.DeletedAt.Valid {
-			// Parent doesn't exist or is deleted, restore to root
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				log.Printf("failed to find parent folder: %v", err)
+			}
+			// Parent doesn't exist or error, restore to root
+			newParentID = nil
+		} else if parent.DeletedAt.Valid {
+			// Parent is deleted, restore to root
 			newParentID = nil
 		} else {
 			pid := file.ParentID.Int64
