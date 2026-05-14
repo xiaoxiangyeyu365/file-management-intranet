@@ -64,3 +64,17 @@ func (h *TrashHandler) PermanentDelete(c *gin.Context) {
 
 	response.Success(c, nil)
 }
+
+func (h *TrashHandler) EmptyTrash(c *gin.Context) {
+	userID := GetUserID(c)
+
+	count, err := h.fileService.EmptyTrash(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "failed to empty trash")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"deletedCount": count,
+	})
+}
