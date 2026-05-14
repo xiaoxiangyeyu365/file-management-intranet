@@ -295,6 +295,32 @@ func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64)
 	return nil
 }
 
+// DownloadFile returns file and physical file info for download
+func (s *FileService) DownloadFile(ctx context.Context, userID, fileID int64) (*model.File, *model.PhysicalFile, error) {
+	file, err := s.fileRepo.FindByIDAndOwner(ctx, fileID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrFileNotFound
+		}
+		return nil, nil, fmt.Errorf("failed to find file: %w", err)
+	}
+
+	if file.IsFolder {
+		return nil, nil, errors.New("cannot download a folder")
+	}
+
+	if !file.PhysicalID.Valid {
+		return nil, nil, errors.New("file has no physical content")
+	}
+
+	pf, err := s.physicalRepo.FindByID(ctx, file.PhysicalID.Int64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to find physical file: %w", err)
+	}
+
+	return file, pf, nil
+}
+
 // Helper function
 func NullInt64ToInt(nullInt sql.NullInt64) int64 {
 	if nullInt.Valid {
