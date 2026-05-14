@@ -81,3 +81,31 @@ func (r *PhysicalFileRepository) Delete(ctx context.Context, id int64) error {
 func (r *PhysicalFileRepository) Update(ctx context.Context, pf *model.PhysicalFile) error {
 	return r.db.WithContext(ctx).Save(pf).Error
 }
+
+// UpdateImageInfo updates width, height, and optionally metadata in one call
+func (r *PhysicalFileRepository) UpdateImageInfo(ctx context.Context, id int64, width, height int, metadataJSON string) error {
+	updates := map[string]interface{}{
+		"width":  width,
+		"height": height,
+	}
+	if metadataJSON != "" {
+		updates["metadata_json"] = metadataJSON
+	}
+	return r.db.WithContext(ctx).
+		Model(&model.PhysicalFile{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+}
+
+// UpdateMetadataWithOptimisticLock updates metadata only if it's currently NULL
+// Returns true if updated, false if already set by another process
+func (r *PhysicalFileRepository) UpdateMetadataWithOptimisticLock(ctx context.Context, id int64, metadataJSON string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.PhysicalFile{}).
+		Where("id = ? AND (metadata_json IS NULL OR metadata_json = '')", id).
+		Update("metadata_json", metadataJSON)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
