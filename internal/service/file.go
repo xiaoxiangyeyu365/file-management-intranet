@@ -323,6 +323,10 @@ func (s *FileService) DownloadFile(ctx context.Context, userID, fileID int64) (*
 	return file, pf, nil
 }
 
+func (s *FileService) GetStorage() *storage.StorageManager {
+	return s.storage
+}
+
 // Helper function
 func NullInt64ToInt(nullInt sql.NullInt64) int64 {
 	if nullInt.Valid {

@@ -4,6 +4,8 @@ package handler
 import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/response"
+	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -200,4 +202,29 @@ func (h *FileHandler) MoveFiles(c *gin.Context) {
 	}
 
 	response.Success(c, nil)
+}
+
+func (h *FileHandler) DownloadFile(c *gin.Context) {
+	userID := GetUserID(c)
+	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+
+	file, pf, err := h.fileService.DownloadFile(c.Request.Context(), userID, fileID)
+	if err != nil {
+		if err == service.ErrFileNotFound {
+			response.NotFound(c, "file not found")
+			return
+		}
+		response.Error(c, 400, err.Error())
+		return
+	}
+
+	// RFC 5987 encoding for Chinese filename
+	encodedName := url.PathEscape(file.Name)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", encodedName))
+	c.Header("Content-Type", pf.MimeType)
+	c.Header("Content-Length", fmt.Sprintf("%d", pf.Size))
+
+	// Get absolute path and serve file
+	absPath := h.fileService.GetStorage().ToAbsPath(pf.StoragePath)
+	c.File(absPath)
 }
