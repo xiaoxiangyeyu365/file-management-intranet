@@ -5,6 +5,8 @@ import (
 	"cloudbox/internal/model"
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -194,4 +196,71 @@ func NullInt64Ptr(v *int64) sql.NullInt64 {
 		return sql.NullInt64{Valid: false}
 	}
 	return sql.NullInt64{Int64: *v, Valid: true}
+}
+
+// Search searches files by keyword with optional folder scope and sorting
+func (r *FileRepository) Search(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error) {
+	var files []model.File
+
+	// Build base query
+	if folderID == nil {
+		// Global search
+		query := r.db.WithContext(ctx).
+			Where("owner_id = ? AND deleted_at IS NULL AND name LIKE ?", userID, "%"+keyword+"%")
+		query = r.applySearchSort(query, sort, keyword)
+		err := query.Find(&files).Error
+		return files, err
+	}
+
+	// Recursive search in folder and subfolders
+	query := `
+		WITH RECURSIVE subfolders AS (
+			SELECT id FROM files
+			WHERE id = ? AND owner_id = ? AND is_folder = 1 AND deleted_at IS NULL
+			UNION ALL
+			SELECT f.id FROM files f
+			JOIN subfolders s ON f.parent_id = s.id
+			WHERE f.owner_id = ? AND f.is_folder = 1 AND f.deleted_at IS NULL
+		)
+		SELECT f.* FROM files f
+		JOIN subfolders s ON f.parent_id = s.id
+		WHERE f.owner_id = ?
+		  AND f.deleted_at IS NULL
+		  AND f.name LIKE ?
+	`
+
+	// Add ORDER BY clause
+	orderBy := r.buildSearchOrderBy(sort, keyword)
+	query += orderBy
+
+	err := r.db.WithContext(ctx).Raw(query, *folderID, userID, userID, userID, "%"+keyword+"%").Scan(&files).Error
+	return files, err
+}
+
+func (r *FileRepository) applySearchSort(query *gorm.DB, sort, keyword string) *gorm.DB {
+	switch sort {
+	case "time":
+		return query.Order("updated_at DESC")
+	case "name":
+		return query.Order("name ASC")
+	default: // relevance
+		// Use raw SQL with escaped keyword for relevance sorting
+		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
+		return query.Order(fmt.Sprintf(
+			"CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
+			escapedKeyword, escapedKeyword))
+	}
+}
+
+func (r *FileRepository) buildSearchOrderBy(sort, keyword string) string {
+	switch sort {
+	case "time":
+		return " ORDER BY updated_at DESC"
+	case "name":
+		return " ORDER BY name ASC"
+	default: // relevance - escape keyword to prevent SQL injection
+		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
+		return fmt.Sprintf(" ORDER BY CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
+			escapedKeyword, escapedKeyword)
+	}
 }
