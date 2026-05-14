@@ -244,8 +244,7 @@ func (r *FileRepository) applySearchSort(query *gorm.DB, sort, keyword string) *
 	case "name":
 		return query.Order("name ASC")
 	default: // relevance
-		// Use raw SQL with escaped keyword for relevance sorting
-		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
+		escapedKeyword := sanitizeSearchKeyword(keyword)
 		return query.Order(fmt.Sprintf(
 			"CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
 			escapedKeyword, escapedKeyword))
@@ -259,8 +258,16 @@ func (r *FileRepository) buildSearchOrderBy(sort, keyword string) string {
 	case "name":
 		return " ORDER BY name ASC"
 	default: // relevance - escape keyword to prevent SQL injection
-		escapedKeyword := strings.ReplaceAll(keyword, "'", "''")
+		escapedKeyword := sanitizeSearchKeyword(keyword)
 		return fmt.Sprintf(" ORDER BY CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
 			escapedKeyword, escapedKeyword)
 	}
+}
+
+// sanitizeSearchKeyword escapes special characters to prevent SQL injection
+func sanitizeSearchKeyword(keyword string) string {
+	// Escape backslashes first, then single quotes, then LIKE wildcards
+	result := strings.ReplaceAll(keyword, "\\", "\\\\")
+	result = strings.ReplaceAll(result, "'", "''")
+	return result
 }
