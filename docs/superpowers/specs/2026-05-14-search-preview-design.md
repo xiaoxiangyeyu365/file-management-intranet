@@ -202,10 +202,23 @@ func (h *FileHandler) SearchFiles(c *gin.Context)
 
 ### 3.5 并发控制
 
-按需提取时使用与缩略图生成相同的文件锁机制：
-- 锁文件：`{physicalID}.meta.lock`
-- 检查 metadata_json 非空则直接返回
-- 空则获取锁，提取后更新数据库
+按需提取时使用数据库乐观锁，无需文件锁：
+
+```
+请求元数据 → 检查 metadata_json:
+  - 非空：直接返回
+  
+  - 为空：
+    1. 提取元数据（可能多个 goroutine 同时进行）
+    2. UPDATE physical_files SET metadata_json=? WHERE id=? AND metadata_json IS NULL
+    3. 若 RowsAffected=0：别人已更新，查询返回
+    4. 若 RowsAffected=1：更新成功，返回结果
+```
+
+**优点：**
+- 无锁文件残留问题
+- 利用数据库原子性保证"先到先得"
+- 程序崩溃不影响后续请求
 
 ### 3.6 EXIF 提取实现
 
