@@ -282,3 +282,35 @@ func (h *FileHandler) DownloadFolder(c *gin.Context) {
 		log.Printf("error streaming folder zip: %v", err)
 	}
 }
+
+func (h *FileHandler) SearchFiles(c *gin.Context) {
+	userID := GetUserID(c)
+
+	keyword := c.Query("keyword")
+	if keyword == "" {
+		response.BadRequest(c, "keyword is required")
+		return
+	}
+
+	var folderID *int64
+	if folderIDStr := c.Query("folderId"); folderIDStr != "" {
+		id, err := strconv.ParseInt(folderIDStr, 10, 64)
+		if err != nil {
+			response.BadRequest(c, "invalid folderId")
+			return
+		}
+		folderID = &id
+	}
+
+	sort := c.Query("sort")
+
+	files, err := h.fileService.SearchFiles(c.Request.Context(), userID, keyword, folderID, sort)
+	if err != nil {
+		response.InternalError(c, "failed to search files")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"files": files,
+	})
+}
