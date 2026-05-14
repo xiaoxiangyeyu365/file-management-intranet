@@ -41,20 +41,51 @@
 
 ### 2.2 搜索逻辑
 
-**匹配规则：**
-- 文件名不区分大小写
-- 使用 `LIKE '%keyword%'` 模糊匹配
-- 仅搜索当前用户的文件（owner_id 过滤）
-- 仅搜索未删除的文件（deleted_at IS NULL）
+#### 2.2.1 递归搜索子文件夹
 
-**排序规则：**
-- `relevance`（相关度）：完全匹配 > 开头匹配 > 包含匹配
+当 folderId 有值时，使用 SQLite 递归 CTE 一次性查询所有子孙文件夹，避免应用层逐级拉取：
+
+```sql
+WITH RECURSIVE subfolders AS (
+    SELECT id FROM files
+    WHERE id = ? AND owner_id = ? AND is_folder = 1 AND deleted_at IS NULL
+    UNION ALL
+    SELECT f.id FROM files f
+    JOIN subfolders s ON f.parent_id = s.id
+    WHERE f.owner_id = ? AND f.is_folder = 1 AND f.deleted_at IS NULL
+)
+SELECT f.* FROM files f
+JOIN subfolders s ON f.parent_id = s.id
+WHERE f.owner_id = ?
+  AND f.deleted_at IS NULL
+  AND f.name LIKE '%' || ? || '%'
+ORDER BY ...
+```
+
+#### 2.2.2 相关性排序
+
+使用 SQL CASE 表达式实现相关度排序：
+
+```sql
+ORDER BY
+  CASE
+    WHEN name = ? THEN 0
+    WHEN name LIKE ? || '%' THEN 1
+    ELSE 2
+  END,
+  name ASC
+```
+
+#### 2.2.3 排序方式
+
+- `relevance`（相关度）：完全匹配 > 开头匹配 > 包含匹配（CASE 加权）
 - `time`：按更新时间降序
-- `name`：按文件名升序（拼音排序）
+- `name`：按 UTF-8 字节序（SQLite 原生不支持拼音排序，接受字节序作为中文排序）
 
-**范围限制：**
-- folderId 为空：搜索用户所有文件
-- folderId 有值：递归搜索指定文件夹及其所有子文件夹
+#### 2.2.4 搜索性能
+
+- 当前数据量小，`LIKE '%keyword%'` 性能足够
+- 文件数过万时，建议升级为 FTS5 全文搜索（预留扩展）
 
 ### 2.3 Repository 层
 
@@ -62,6 +93,11 @@
 // FileRepository 新增方法
 func (r *FileRepository) Search(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error)
 ```
+
+实现要点：
+- 使用原生 SQL + 递归 CTE（folderId 有值时）
+- 动态构造 ORDER BY 子句
+- GORM 占位符防 SQL 注入
 
 ### 2.4 Service 层
 
@@ -111,15 +147,15 @@ func (h *FileHandler) SearchFiles(c *gin.Context)
   "data": {
     "width": 1920,
     "height": 1080,
-    "camera": "Canon EOS 5D Mark IV",
-    "takenAt": "2026-05-14T10:30:00Z",
-    "gpsLat": 39.9042,
-    "gpsLng": 116.4074,
-    "iso": 400,
-    "aperture": "f/2.8",
-    "shutterSpeed": "1/125",
-    "focalLength": "50mm",
     "exif": {
+      "Camera": "Canon EOS 5D Mark IV",
+      "DateTimeOriginal": "2026-05-14T10:30:00Z",
+      "GPSLatitude": 39.9042,
+      "GPSLongitude": 116.4074,
+      "ISOSpeedRatings": 400,
+      "FNumber": "f/2.8",
+      "ExposureTime": "1/125",
+      "FocalLength": "50mm",
       "Software": "Adobe Lightroom",
       "Orientation": 1
     }
@@ -133,44 +169,59 @@ func (h *FileHandler) SearchFiles(c *gin.Context)
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| width | INT | 图片宽度（像素） |
+| width | INT | 图片宽度（像素），用于缩略图生成优化 |
 | height | INT | 图片高度（像素） |
-| camera | VARCHAR(255) | 相机型号 |
-| taken_at | DATETIME | 拍摄时间 |
-| gps_lat | DECIMAL(10,7) | 纬度 |
-| gps_lng | DECIMAL(10,7) | 经度 |
-| iso | INT | ISO 感光度 |
-| aperture | VARCHAR(20) | 光圈值（如 f/2.8） |
-| shutter_speed | VARCHAR(20) | 快门速度（如 1/125） |
-| focal_length | VARCHAR(20) | 焦距（如 50mm） |
-| exif_json | TEXT | 其他 EXIF 信息（JSON 格式） |
+| metadata_json | TEXT | 图片元数据（JSON 格式），包含 EXIF 信息 |
+
+**设计说明：**
+- 仅保留 `width`、`height` 作为独立字段（缩略图生成需要）
+- 所有 EXIF 信息存储在 `metadata_json`，扩展性强
+- 非 图片文件的这些字段为 NULL，SQLite NULL 开销小
 
 ### 3.4 元数据提取流程
 
-**上传时提取：**
-1. 图片上传完成后，UploadService 调用 PreviewService
-2. PreviewService 检测文件 MIME 类型
-3. 若为图片，提取元数据并存储到数据库
+#### 上传时提取（合并缩略图生成）：
 
-**按需提取：**
-1. 请求元数据时，检查数据库是否已有
-2. 若有，直接返回
-3. 若无，实时提取并更新数据库
+```
+上传完成 → 后台 goroutine:
+  1. 打开图片文件
+  2. image.DecodeConfig 快速获取宽高
+  3. 若需要缩略图，生成并保存
+  4. go-exif 解析完整 EXIF
+  5. 组装 metadata_json
+  6. 一次性更新 physical_files (thumbnail_path, width, height, metadata_json)
+```
 
-### 3.5 EXIF 提取实现
+#### 按需提取：
+
+```
+请求元数据 → 检查 metadata_json:
+  - 非空：直接返回
+  - 为空：加锁提取，更新数据库，返回结果
+```
+
+### 3.5 并发控制
+
+按需提取时使用与缩略图生成相同的文件锁机制：
+- 锁文件：`{physicalID}.meta.lock`
+- 检查 metadata_json 非空则直接返回
+- 空则获取锁，提取后更新数据库
+
+### 3.6 EXIF 提取实现
 
 使用 Go 库：`github.com/dsoprea/go-exif/v3`
 
-**提取字段映射：**
-- 相机型号：`Make` + `Model`
+**提取字段（存入 metadata_json）：**
+- 相机：`Make` + `Model` → `Camera`
 - 拍摄时间：`DateTimeOriginal`
-- GPS：`GPSLatitude` + `GPSLongitude`
+- GPS：`GPSLatitude`、`GPSLongitude`
 - ISO：`ISOSpeedRatings`
 - 光圈：`FNumber`
 - 快门：`ExposureTime`
 - 焦距：`FocalLength`
+- 其他：全部原始 EXIF 标签
 
-### 3.6 Service 层
+### 3.7 Service 层
 
 ```go
 // PreviewService 新建
@@ -181,14 +232,14 @@ type PreviewService struct {
 
 func NewPreviewService(physicalRepo *repository.PhysicalFileRepository, storage *storage.StorageManager) *PreviewService
 
-// 提取并存储元数据
-func (s *PreviewService) ExtractAndSaveMetadata(ctx context.Context, physicalID int64) error
+// 合并处理：生成缩略图 + 提取元数据
+func (s *PreviewService) ProcessImage(ctx context.Context, physicalID int64) error
 
 // 获取元数据（按需提取）
 func (s *PreviewService) GetMetadata(ctx context.Context, userID, fileID int64) (*ImageMetadata, error)
 ```
 
-### 3.7 Handler 层
+### 3.8 Handler 层
 
 ```go
 // PreviewHandler 新建
@@ -200,18 +251,22 @@ type PreviewHandler struct {
 func (h *PreviewHandler) GetMetadata(c *gin.Context)
 ```
 
+### 3.9 权限校验
+
+GetMetadata 通过 fileId 找到文件记录，校验 `owner_id == 当前用户`，再通过 `physical_id` 获取物理文件元数据。
+
 ---
 
 ## 4. 文件变更清单
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `internal/model/physical_file.go` | Modify | 新增元数据字段 |
-| `internal/repository/file.go` | Modify | 新增 Search 方法 |
+| `internal/model/physical_file.go` | Modify | 新增 width, height, metadata_json 字段 |
+| `internal/repository/file.go` | Modify | 新增 Search 方法（递归 CTE） |
 | `internal/repository/physical_file.go` | Modify | 新增 UpdateMetadata 方法 |
 | `internal/service/file.go` | Modify | 新增 SearchFiles 方法 |
-| `internal/service/preview.go` | Create | 新建预览服务 |
-| `internal/service/upload.go` | Modify | 上传完成后调用预览服务 |
+| `internal/service/preview.go` | Create | 新建预览服务（合并缩略图+元数据） |
+| `internal/service/upload.go` | Modify | 上传完成后调用 PreviewService.ProcessImage |
 | `internal/handler/file.go` | Modify | 新增 SearchFiles handler |
 | `internal/handler/preview.go` | Create | 新建预览 handler |
 | `cmd/server/main.go` | Modify | 注册新路由 |
@@ -234,7 +289,7 @@ func (h *PreviewHandler) GetMetadata(c *gin.Context)
 - 支持文件类型筛选（MIME type）
 - 支持文件大小范围筛选
 - 支持时间范围筛选
-- 未来可升级为全文搜索（FTS5）
+- 升级为 FTS5 全文搜索（文件数过万时）
 
 **文件预览扩展：**
 - PDF 预览（转换为图片）
