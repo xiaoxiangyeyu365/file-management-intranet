@@ -595,3 +595,83 @@ func (s *FileService) addFileToZip(zipWriter *zip.Writer, absPath, zipPath strin
 	_, err = io.Copy(writer, file)
 	return err
 }
+
+// EmptyTrash permanently deletes all files in trash for a user
+func (s *FileService) EmptyTrash(ctx context.Context, userID int64) (int, error) {
+	// Get all trashed files
+	trashFiles, err := s.fileRepo.FindTrash(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list trash: %w", err)
+	}
+
+	if len(trashFiles) == 0 {
+		return 0, nil
+	}
+
+	// Collect all files including descendants
+	var allFiles []model.File
+	physicalRefCount := make(map[int64]int)
+
+	for _, file := range trashFiles {
+		allFiles = append(allFiles, file)
+
+		// Get descendants
+		descendants, err := s.fileRepo.FindAllDescendants(ctx, file.ID)
+		if err != nil {
+			log.Printf("warning: failed to get descendants for %d: %v", file.ID, err)
+			continue
+		}
+		allFiles = append(allFiles, descendants...)
+	}
+
+	// Count physical file references
+	for _, f := range allFiles {
+		if !f.IsFolder && f.PhysicalID.Valid {
+			physicalRefCount[f.PhysicalID.Int64]++
+		}
+	}
+
+	// Delete all file records
+	for _, f := range allFiles {
+		if err := s.fileRepo.Delete(ctx, f.ID); err != nil {
+			log.Printf("warning: failed to delete file record %d: %v", f.ID, err)
+		}
+	}
+
+	// Handle physical files
+	for pid, count := range physicalRefCount {
+		newRefCount, err := s.physicalRepo.DecrementRefCount(ctx, pid, count)
+		if err != nil {
+			log.Printf("warning: failed to decrement ref count for physical file %d: %v", pid, err)
+			continue
+		}
+
+		if newRefCount <= 0 {
+			pf, err := s.physicalRepo.FindByID(ctx, pid)
+			if err != nil {
+				log.Printf("warning: failed to find physical file %d: %v", pid, err)
+				continue
+			}
+
+			// Delete physical file
+			absPath := s.storage.ToAbsPath(pf.StoragePath)
+			if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: failed to delete physical file %s: %v", absPath, err)
+			}
+
+			// Delete thumbnail
+			if pf.ThumbnailPath != "" {
+				if err := os.Remove(pf.ThumbnailPath); err != nil && !os.IsNotExist(err) {
+					log.Printf("warning: failed to delete thumbnail %s: %v", pf.ThumbnailPath, err)
+				}
+			}
+
+			// Delete physical file record
+			if err := s.physicalRepo.Delete(ctx, pid); err != nil {
+				log.Printf("warning: failed to delete physical file record %d: %v", pid, err)
+			}
+		}
+	}
+
+	return len(trashFiles), nil
+}
