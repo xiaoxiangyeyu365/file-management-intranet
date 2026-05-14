@@ -10,6 +10,9 @@ type PhysicalFile struct {
 	MimeType      string    `gorm:"size:100" json:"mimeType"`
 	RefCount      int       `gorm:"default:1" json:"refCount"`
 	ThumbnailPath string    `gorm:"size:500" json:"thumbnailPath"`
+	Width         int       `gorm:"default:0" json:"width"`
+	Height        int       `gorm:"default:0" json:"height"`
+	MetadataJSON  string    `gorm:"type:text" json:"metadataJson"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
