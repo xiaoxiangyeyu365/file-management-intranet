@@ -45,23 +45,26 @@ func validateUploadID(uploadID string) error {
 }
 
 type UploadService struct {
-	fileRepo     *repository.FileRepository
-	physicalRepo *repository.PhysicalFileRepository
-	storage      *storage.StorageManager
-	chunkSize    int64
+	fileRepo       *repository.FileRepository
+	physicalRepo   *repository.PhysicalFileRepository
+	storage        *storage.StorageManager
+	chunkSize      int64
+	previewService *PreviewService
 }
 
 func NewUploadService(
 	fileRepo *repository.FileRepository,
 	physicalRepo *repository.PhysicalFileRepository,
 	storage *storage.StorageManager,
+	previewService *PreviewService,
 ) *UploadService {
 	cfg := config.Get()
 	return &UploadService{
-		fileRepo:     fileRepo,
-		physicalRepo: physicalRepo,
-		storage:      storage,
-		chunkSize:    cfg.Upload.ChunkSize,
+		fileRepo:       fileRepo,
+		physicalRepo:   physicalRepo,
+		storage:        storage,
+		chunkSize:      cfg.Upload.ChunkSize,
+		previewService: previewService,
 	}
 }
 
@@ -276,8 +279,10 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 		return nil, err
 	}
 
-	// Generate thumbnail asynchronously
-	go s.generateThumbnail(pf.ID, absolute)
+	// Process image asynchronously (thumbnail + metadata)
+	if s.previewService != nil {
+		go s.previewService.ProcessImage(context.Background(), pf.ID)
+	}
 
 	return file, nil
 }
@@ -298,11 +303,6 @@ func (s *UploadService) createFileRecord(ctx context.Context, userID int64, file
 	}
 
 	return file, nil
-}
-
-func (s *UploadService) generateThumbnail(physicalID int64, filePath string) {
-	// TODO: Implement thumbnail generation
-	// This will be implemented in a separate task
 }
 
 func detectMimeType(filename string) string {
