@@ -228,3 +228,25 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	absPath := h.fileService.GetStorage().ToAbsPath(pf.StoragePath)
 	c.File(absPath)
 }
+
+func (h *FileHandler) GetThumbnail(c *gin.Context) {
+	userID := GetUserID(c)
+	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+
+	thumbnailPath, err := h.fileService.GetThumbnail(c.Request.Context(), userID, fileID)
+	if err != nil {
+		if err == service.ErrFileNotFound {
+			response.NotFound(c, "file not found")
+			return
+		}
+		if err == service.ErrNotImage {
+			response.Error(c, 400, "file is not an image")
+			return
+		}
+		response.InternalError(c, "failed to get thumbnail")
+		return
+	}
+
+	c.Header("Content-Type", "image/jpeg")
+	c.File(thumbnailPath)
+}
