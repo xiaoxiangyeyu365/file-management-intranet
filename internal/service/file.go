@@ -2,6 +2,7 @@
 package service
 
 import (
+	"archive/zip"
 	"cloudbox/internal/model"
 	"cloudbox/internal/repository"
 	"cloudbox/internal/util/storage"
@@ -13,6 +14,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -510,4 +512,86 @@ func resizeImage(img image.Image, maxSize int) image.Image {
 		}
 	}
 	return dst
+}
+
+// StreamFolderZip creates a zip file and streams it to writer
+func (s *FileService) StreamFolderZip(ctx context.Context, userID, folderID int64, writer io.Writer) error {
+	folder, err := s.fileRepo.FindByIDAndOwner(ctx, folderID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFileNotFound
+		}
+		return fmt.Errorf("failed to find folder: %w", err)
+	}
+
+	if !folder.IsFolder {
+		return errors.New("not a folder")
+	}
+
+	zipWriter := zip.NewWriter(writer)
+	defer zipWriter.Close()
+
+	// Recursively add files
+	return s.addFolderToZip(ctx, zipWriter, folder, folder.Name)
+}
+
+func (s *FileService) addFolderToZip(ctx context.Context, zipWriter *zip.Writer, folder *model.File, basePath string) error {
+	files, err := s.fileRepo.FindByParentAndOwner(ctx, folder.ID, folder.OwnerID, false)
+	if err != nil {
+		return fmt.Errorf("failed to list folder contents: %w", err)
+	}
+
+	for _, file := range files {
+		fullPath := filepath.Join(basePath, file.Name)
+
+		if file.IsFolder {
+			// Recursively add subfolder
+			if err := s.addFolderToZip(ctx, zipWriter, &file, fullPath); err != nil {
+				return err
+			}
+		} else if file.PhysicalID.Valid {
+			// Add file
+			pf, err := s.physicalRepo.FindByID(ctx, file.PhysicalID.Int64)
+			if err != nil {
+				log.Printf("warning: failed to find physical file %d: %v", file.PhysicalID.Int64, err)
+				continue
+			}
+
+			absPath := s.storage.ToAbsPath(pf.StoragePath)
+			if err := s.addFileToZip(zipWriter, absPath, fullPath); err != nil {
+				log.Printf("warning: failed to add file %s to zip: %v", fullPath, err)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *FileService) addFileToZip(zipWriter *zip.Writer, absPath, zipPath string) error {
+	file, err := os.Open(absPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	header, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	header.Name = zipPath
+	header.Method = zip.Deflate
+
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(writer, file)
+	return err
 }
