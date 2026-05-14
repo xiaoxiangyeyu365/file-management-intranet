@@ -1,0 +1,98 @@
+// Element Plus CSS import
+@import 'element-plus/dist/index.css';
+
+// CSS variables
+:root {
+  --color-primary: #409eff;
+  --color-success: #67c23a;
+  --color-warning: #e6a23c;
+  --color-danger: #f56c6c;
+  --sidebar-width: 200px;
+  --header-height: 60px;
+  --upload-panel-width: 320px;
+}
+
+// Reset and base styles
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+// Hide scrollbar but allow scrolling
+.hide-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+// Layout utilities
+.flex {
+  display: flex;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+// File type icons
+.file-icon {
+  font-size: 24px;
+}
+
+.folder-icon {
+  color: #409eff;
+}
+
+.image-icon {
+  color: #67c23a;
+}
+
+.doc-icon {
+  color: #909399;
+}
+
+.video-icon {
+  color: #e6a23c;
+}
+
+// Drag and drop overlay
+.drag-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(64, 158, 255, 0.1);
+  border: 3px dashed var(--color-primary);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .drag-content {
+    text-align: center;
+    color: var(--color-primary);
+    font-size: 24px;
+
+    .icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+  }
+}
