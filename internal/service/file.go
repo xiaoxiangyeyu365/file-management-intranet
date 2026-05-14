@@ -675,3 +675,21 @@ func (s *FileService) EmptyTrash(ctx context.Context, userID int64) (int, error)
 
 	return len(trashFiles), nil
 }
+
+// SearchFiles searches files by keyword with optional folder scope and sorting
+func (s *FileService) SearchFiles(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error) {
+	if keyword == "" {
+		return nil, errors.New("keyword is required")
+	}
+
+	// Validate sort parameter
+	validSorts := map[string]bool{"relevance": true, "time": true, "name": true}
+	if sort == "" {
+		sort = "relevance"
+	}
+	if !validSorts[sort] {
+		sort = "relevance"
+	}
+
+	return s.fileRepo.Search(ctx, userID, keyword, folderID, sort)
+}
