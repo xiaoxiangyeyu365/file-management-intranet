@@ -93,6 +93,17 @@ func main() {
 		}
 	}
 
+	// Serve static files (must be after API routes)
+	r.Static("/assets", "./web/dist/assets")
+	r.NoRoute(func(c *gin.Context) {
+		data, err := staticFiles.ReadFile("web/dist/index.html")
+		if err != nil {
+			c.String(404, "Frontend not found. Run 'cd web && npm run build' first.")
+			return
+		}
+		c.Data(200, "text/html; charset=utf-8", data)
+	})
+
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("Server starting at http://%s", addr)
