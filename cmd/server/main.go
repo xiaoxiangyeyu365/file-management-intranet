@@ -7,6 +7,7 @@ import (
 	"cloudbox/internal/repository"
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/storage"
+	"cloudbox/static"
 	"fmt"
 	"log"
 
@@ -94,11 +95,11 @@ func main() {
 	}
 
 	// Serve static files (must be after API routes)
-	r.Static("/assets", "./web/dist/assets")
+	r.Static("/assets", "./static/assets")
 	r.NoRoute(func(c *gin.Context) {
-		data, err := staticFiles.ReadFile("web/dist/index.html")
+		data, err := static.StaticFiles.ReadFile("index.html")
 		if err != nil {
-			c.String(404, "Frontend not found. Run 'cd web && npm run build' first.")
+			c.String(404, "Frontend not found. Run 'make build-frontend' first.")
 			return
 		}
 		c.Data(200, "text/html; charset=utf-8", data)

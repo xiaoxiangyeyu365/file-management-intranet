@@ -1,6 +1,6 @@
 BINARY := cloudbox
 WEB_DIR := web
-DIST_DIR := $(WEB_DIR)/dist
+STATIC_DIR := cmd/server/static
 
 .PHONY: build run clean test build-frontend
 
@@ -8,14 +8,14 @@ build: build-frontend
 	go build -o $(BINARY) ./cmd/server
 
 build-frontend:
-	cd $(WEB_DIR) && npm install && npm run build
+	cd $(WEB_DIR) && npm run build
 
 run:
 	go run ./cmd/server
 
 clean:
 	rm -f $(BINARY)
-	rm -rf $(DIST_DIR)
+	rm -rf $(STATIC_DIR)
 
 test:
 	go test ./... -v
