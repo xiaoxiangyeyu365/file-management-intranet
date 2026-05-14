@@ -23,6 +23,8 @@ var (
 	ErrNameConflict      = errors.New("file name already exists")
 	ErrCircularReference = errors.New("cannot move to a subfolder")
 	ErrInvalidTarget     = errors.New("invalid target folder")
+	ErrIsFolder          = errors.New("cannot download a folder")
+	ErrNoPhysicalContent = errors.New("file has no physical content")
 )
 
 type FileService struct {
@@ -306,11 +308,11 @@ func (s *FileService) DownloadFile(ctx context.Context, userID, fileID int64) (*
 	}
 
 	if file.IsFolder {
-		return nil, nil, errors.New("cannot download a folder")
+		return nil, nil, ErrIsFolder
 	}
 
 	if !file.PhysicalID.Valid {
-		return nil, nil, errors.New("file has no physical content")
+		return nil, nil, ErrNoPhysicalContent
 	}
 
 	pf, err := s.physicalRepo.FindByID(ctx, file.PhysicalID.Int64)
