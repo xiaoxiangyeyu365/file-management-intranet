@@ -5,6 +5,7 @@ import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/response"
 	"fmt"
+	"log"
 	"net/url"
 	"strconv"
 
@@ -249,4 +250,35 @@ func (h *FileHandler) GetThumbnail(c *gin.Context) {
 
 	c.Header("Content-Type", "image/jpeg")
 	c.File(thumbnailPath)
+}
+
+func (h *FileHandler) DownloadFolder(c *gin.Context) {
+	userID := GetUserID(c)
+	folderID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+
+	// Get folder info first for filename
+	folder, err := h.fileService.GetFile(c.Request.Context(), userID, folderID)
+	if err != nil {
+		if err == service.ErrFileNotFound {
+			response.NotFound(c, "folder not found")
+			return
+		}
+		response.InternalError(c, "failed to get folder")
+		return
+	}
+
+	if !folder.IsFolder {
+		response.Error(c, 400, "not a folder")
+		return
+	}
+
+	// RFC 5987 encoding for Chinese filename
+	encodedName := url.PathEscape(folder.Name)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s.zip", encodedName))
+	c.Header("Content-Type", "application/zip")
+
+	if err := h.fileService.StreamFolderZip(c.Request.Context(), userID, folderID, c.Writer); err != nil {
+		// Headers already sent, can only log error
+		log.Printf("error streaming folder zip: %v", err)
+	}
 }
