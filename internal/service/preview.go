@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	ErrNotImage       = errors.New("file is not an image")
 	ErrMetadataFailed = errors.New("failed to extract metadata")
 )
 
@@ -200,33 +199,34 @@ func (s *PreviewService) extractEXIF(path string) (map[string]any, error) {
 
 	result := make(map[string]any)
 
-	// Walk through all tags
-	exif.Walk(index, func(ifd *exif.Ifd, ite *exif.IfdTagEntry) error {
-		tagName, err := ite.TagName()
-		if err != nil {
-			return nil
-		}
-
-		value, err := ifd.TagValue(ite)
-		if err != nil {
-			return nil
-		}
-
-		// Format specific tags
-		switch v := value.(type) {
-		case []byte:
-			if len(v) < 100 {
-				result[tagName] = fmt.Sprintf("%x", v)
+	// Walk through all IFDs and their tags
+	for _, ifd := range index.Ifds {
+		for _, entry := range ifd.Entries() {
+			tagName := entry.TagName()
+			if tagName == "" {
+				continue
 			}
-		case []interface{}:
-			if len(v) <= 4 {
+
+			value, err := entry.Value()
+			if err != nil {
+				continue
+			}
+
+			// Format specific tags
+			switch v := value.(type) {
+			case []byte:
+				if len(v) < 100 {
+					result[tagName] = fmt.Sprintf("%x", v)
+				}
+			case []interface{}:
+				if len(v) <= 4 {
+					result[tagName] = v
+				}
+			default:
 				result[tagName] = v
 			}
-		default:
-			result[tagName] = v
 		}
-		return nil
-	})
+	}
 
 	return result, nil
 }
@@ -304,50 +304,4 @@ func (s *PreviewService) generateThumbnail(pf *model.PhysicalFile, srcPath, thum
 
 	// Update database
 	return s.physicalRepo.UpdateThumbnail(context.Background(), pf.ID, thumbPath)
-}
-
-func resizeImage(img image.Image, maxSize int) image.Image {
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	if width <= maxSize && height <= maxSize {
-		return img
-	}
-
-	var newWidth, newHeight int
-	if width > height {
-		newWidth = maxSize
-		newHeight = height * maxSize / width
-	} else {
-		newHeight = maxSize
-		newWidth = width * maxSize / height
-	}
-
-	if newWidth < 1 {
-		newWidth = 1
-	}
-	if newHeight < 1 {
-		newHeight = 1
-	}
-
-	dst := image.NewRGBA(image.Rect(0, 0, newWidth, newHeight))
-	for y := 0; y < newHeight; y++ {
-		for x := 0; x < newWidth; x++ {
-			srcX := x * width / newWidth
-			srcY := y * height / newHeight
-			dst.Set(x, y, img.At(srcX+bounds.Min.X, srcY+bounds.Min.Y))
-		}
-	}
-	return dst
-}
-
-func isImageType(mimeType string) bool {
-	imageTypes := []string{"image/jpeg", "image/png", "image/gif"}
-	for _, t := range imageTypes {
-		if mimeType == t {
-			return true
-		}
-	}
-	return false
 }

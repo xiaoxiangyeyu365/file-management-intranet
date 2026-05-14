@@ -30,12 +30,14 @@ func main() {
 
 	// Initialize services
 	authService := service.NewAuthService(userRepo)
+	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager)
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager)
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager, previewService)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
 	fileHandler := handler.NewFileHandler(fileService)
+	previewHandler := handler.NewPreviewHandler(previewService, fileService)
 	trashHandler := handler.NewTrashHandler(fileService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
 
@@ -62,10 +64,12 @@ func main() {
 
 			// Files
 			protected.GET("/files", fileHandler.ListFiles)
+			protected.GET("/files/search", fileHandler.SearchFiles)  // Must be before /files/:id
 			protected.GET("/files/lookup", fileHandler.LookupFile)
 			protected.GET("/files/:id", fileHandler.GetFile)
 			protected.GET("/files/:id/download", fileHandler.DownloadFile)
 			protected.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
+			protected.GET("/files/:id/metadata", previewHandler.GetMetadata)
 			protected.PUT("/files/:id", fileHandler.RenameFile)
 			protected.DELETE("/files/:id", fileHandler.DeleteFile)
 			protected.PATCH("/files/move", fileHandler.MoveFiles)
