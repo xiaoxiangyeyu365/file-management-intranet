@@ -64,17 +64,21 @@ func main() {
 			protected.GET("/files", fileHandler.ListFiles)
 			protected.GET("/files/lookup", fileHandler.LookupFile)
 			protected.GET("/files/:id", fileHandler.GetFile)
+			protected.GET("/files/:id/download", fileHandler.DownloadFile)
+			protected.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
 			protected.PUT("/files/:id", fileHandler.RenameFile)
 			protected.DELETE("/files/:id", fileHandler.DeleteFile)
 			protected.PATCH("/files/move", fileHandler.MoveFiles)
 
 			// Folders
 			protected.POST("/folders", fileHandler.CreateFolder)
+			protected.GET("/folders/:id/download", fileHandler.DownloadFolder)
 
 			// Trash
 			protected.GET("/trash", trashHandler.ListTrash)
 			protected.POST("/trash/:id/restore", trashHandler.RestoreFile)
 			protected.DELETE("/trash/:id", trashHandler.PermanentDelete)
+			protected.DELETE("/trash", trashHandler.EmptyTrash)
 
 			// Upload
 			protected.POST("/upload/init", uploadHandler.InitUpload)
