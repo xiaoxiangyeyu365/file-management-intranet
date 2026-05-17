@@ -18,13 +18,22 @@
         <el-icon><Delete /></el-icon>
         <span>回收站</span>
       </router-link>
+
+      <router-link
+        to="/clipboard"
+        class="nav-item"
+        :class="{ active: route.path === '/clipboard' }"
+      >
+        <el-icon><Document /></el-icon>
+        <span>云剪切板</span>
+      </router-link>
     </nav>
   </aside>
 </template>
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { Folder, Delete } from '@element-plus/icons-vue'
+import { Folder, Delete, Document } from '@element-plus/icons-vue'
 
 const route = useRoute()
 </script>

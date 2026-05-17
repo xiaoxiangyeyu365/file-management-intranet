@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import LoginView from '@/views/LoginView.vue'
 import FilesView from '@/views/FilesView.vue'
 import TrashView from '@/views/TrashView.vue'
+import ClipboardView from '@/views/ClipboardView.vue'
 
 const routes = [
   {
@@ -21,6 +22,12 @@ const routes = [
     path: '/trash',
     name: 'Trash',
     component: TrashView,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/clipboard',
+    name: 'Clipboard',
+    component: ClipboardView,
     meta: { requiresAuth: true }
   }
 ]
