@@ -28,12 +28,14 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	fileRepo := repository.NewFileRepository(db)
 	physicalRepo := repository.NewPhysicalFileRepository(db)
+	clipboardRepo := repository.NewClipboardRepository(db)
 
 	// Initialize services
 	authService := service.NewAuthService(userRepo)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager)
 	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager, previewService)
+	clipboardService := service.NewClipboardService(clipboardRepo)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
@@ -41,9 +43,24 @@ func main() {
 	previewHandler := handler.NewPreviewHandler(previewService, fileService)
 	trashHandler := handler.NewTrashHandler(fileService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
+	clipboardHandler := handler.NewClipboardHandler(clipboardService)
 
 	// Setup Gin
 	r := gin.Default()
+
+	// CORS middleware for cross-origin requests
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Header("Access-Control-Max-Age", "86400")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
 
 	// API routes
 	api := r.Group("/api")
@@ -84,6 +101,13 @@ func main() {
 			protected.POST("/trash/:id/restore", trashHandler.RestoreFile)
 			protected.DELETE("/trash/:id", trashHandler.PermanentDelete)
 			protected.DELETE("/trash", trashHandler.EmptyTrash)
+
+			// Clipboard
+			protected.GET("/clipboard", clipboardHandler.List)
+			protected.POST("/clipboard", clipboardHandler.Create)
+			protected.PATCH("/clipboard/:id/pin", clipboardHandler.UpdatePin)
+			protected.DELETE("/clipboard/:id", clipboardHandler.Delete)
+			protected.DELETE("/clipboard", clipboardHandler.Clear)
 
 			// Upload
 			protected.POST("/upload/init", uploadHandler.InitUpload)
