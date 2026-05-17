@@ -24,8 +24,12 @@ api.interceptors.request.use(
 
 // Response interceptor: handle 401
 api.interceptors.response.use(
-  response => response.data,
+  response => {
+    console.log('API response:', response)
+    return response.data
+  },
   error => {
+    console.error('API error:', error)
     if (error.response?.status === 401) {
       const authStore = useAuthStore()
       authStore.token = null
@@ -70,17 +74,22 @@ export const folderAPI = {
 // Upload API
 export const uploadAPI = {
   init: (md5, name, parentId, size) =>
-    api.post('/upload/init', { md5, name, parentId, size }),
+    api.post('/upload/init', { md5, fileName: name, targetFolderId: parentId, fileSize: size }),
   uploadChunk: (uploadId, index, chunk) => {
     const formData = new FormData()
     formData.append('chunk', chunk)
+    // Get token directly from localStorage to ensure it's included
+    const token = localStorage.getItem('cloudbox_token')
     return api.put(`/upload/${uploadId}/chunk/${index}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'Authorization': token ? `Bearer ${token}` : ''
+      }
     })
   },
   progress: (uploadId) => api.get(`/upload/${uploadId}/progress`),
-  complete: (uploadId, name, parentId) =>
-    api.post(`/upload/${uploadId}/complete`, { name, parentId }),
+  complete: (uploadId, name, parentId, md5, size) =>
+    api.post(`/upload/${uploadId}/complete`, { fileName: name, targetFolderId: parentId, md5, fileSize: size }),
   cancel: (uploadId) => api.delete(`/upload/${uploadId}`)
 }
 
@@ -94,7 +103,18 @@ export const trashAPI = {
 
 // Preview API
 export const previewAPI = {
-  get: (id) => api.get(`/preview/${id}`)
+  get: (id) => api.get(`/files/${id}/metadata`)
+}
+
+// Clipboard API
+export const clipboardAPI = {
+  list: () => api.get('/clipboard'),
+  create: (content) => api.post('/clipboard', { content }),
+  togglePin: (id, pinned) => api.patch(`/clipboard/${id}/pin`, { pinned }),
+  delete: (id) => api.delete(`/clipboard/${id}`),
+  clear: (onlyUnpinned = true) => api.delete('/clipboard', {
+    params: { onlyUnpinned: onlyUnpinned.toString() }
+  })
 }
 
 export default api
