@@ -43,11 +43,18 @@ func (s *StorageManager) GenerateFilePath(physicalID int64, ext string) (relativ
 	filename := fmt.Sprintf("%d%s", physicalID, ext)
 	relative = filepath.Join(dateDir, filename)
 	absolute = filepath.Join(s.rootDir, relative)
+	// Ensure forward slashes for database storage
+	relative = filepath.ToSlash(relative)
 	return
 }
 
 func (s *StorageManager) ToAbsPath(relative string) string {
-	return filepath.Join(s.rootDir, relative)
+	// Convert any backslashes to forward slashes first, then join
+	// This handles cases where the DB stores Windows-style paths
+	relative = filepath.ToSlash(relative)
+	path := filepath.Join(s.rootDir, relative)
+	// Convert back to OS-native separators for the final path
+	return filepath.FromSlash(path)
 }
 
 func (s *StorageManager) ThumbnailPath(physicalID int64) string {
