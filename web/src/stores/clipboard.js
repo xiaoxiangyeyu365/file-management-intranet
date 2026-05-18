@@ -3,6 +3,7 @@ import { clipboardAPI } from '@/utils/api'
 import { ElMessage } from 'element-plus'
 
 const MAX_CONTENT_SIZE = 10240
+const DEVICE_NAME_KEY = 'cloudbox_device_name'
 
 export const useClipboardStore = defineStore('clipboard', {
   state: () => ({
@@ -26,8 +27,8 @@ export const useClipboardStore = defineStore('clipboard', {
       this.loading = true
       try {
         const response = await clipboardAPI.list()
-        const data = response?.data || response
-        this.records = data.records || []
+        // API returns {code, message, data} where data.records has the list
+        this.records = response.data?.records || response.records || []
       } catch (err) {
         console.error('Failed to fetch clipboard records:', err)
       } finally {
@@ -45,16 +46,21 @@ export const useClipboardStore = defineStore('clipboard', {
         return null
       }
 
+      // Get device name from localStorage
+      const deviceName = localStorage.getItem(DEVICE_NAME_KEY) || '未命名设备'
+
       try {
-        const response = await clipboardAPI.create(content)
-        const data = response?.data || response
-        this.records.unshift(data)
+        const response = await clipboardAPI.createWithDevice(content, deviceName)
+        // API returns {code, message, data} - extract the actual record
+        const record = response?.data || response
+        this.records.unshift(record)
         if (this.records.length > 50) {
           this.records = this.records.slice(0, 50)
         }
         ElMessage.success('已保存到云剪切板')
-        return data
+        return record
       } catch (err) {
+        console.error('Create record error:', err)
         ElMessage.error('保存失败')
         return null
       }

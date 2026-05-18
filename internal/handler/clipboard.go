@@ -18,7 +18,8 @@ func NewClipboardHandler(s *service.ClipboardService) *ClipboardHandler {
 }
 
 type CreateClipboardRequest struct {
-	Content string `json:"content" binding:"required"`
+	Content    string `json:"content" binding:"required"`
+	DeviceName string `json:"deviceName"`
 }
 
 type UpdatePinRequest struct {
@@ -54,6 +55,9 @@ func (h *ClipboardHandler) Create(c *gin.Context) {
 	}
 
 	deviceName := c.GetHeader("X-Device-Name")
+	if deviceName == "" {
+		deviceName = req.DeviceName
+	}
 	if deviceName == "" {
 		deviceName = "未命名设备"
 	}

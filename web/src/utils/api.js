@@ -24,12 +24,8 @@ api.interceptors.request.use(
 
 // Response interceptor: handle 401
 api.interceptors.response.use(
-  response => {
-    console.log('API response:', response)
-    return response.data
-  },
+  response => response.data,
   error => {
-    console.error('API error:', error)
     if (error.response?.status === 401) {
       const authStore = useAuthStore()
       authStore.token = null
@@ -110,6 +106,8 @@ export const previewAPI = {
 export const clipboardAPI = {
   list: () => api.get('/clipboard'),
   create: (content) => api.post('/clipboard', { content }),
+  createWithDevice: (content, deviceName) =>
+    api.post('/clipboard', { content, deviceName }),
   togglePin: (id, pinned) => api.patch(`/clipboard/${id}/pin`, { pinned }),
   delete: (id) => api.delete(`/clipboard/${id}`),
   clear: (onlyUnpinned = true) => api.delete('/clipboard', {

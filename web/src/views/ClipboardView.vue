@@ -36,7 +36,7 @@
           <div class="device-section">
             <span class="label">设备名称：</span>
             <el-input
-              v-model="deviceNameValue"
+              v-model="deviceName"
               placeholder="设置设备名称，方便识别来源"
               style="width: 200px"
             />
@@ -44,8 +44,8 @@
           </div>
 
           <!-- Records List -->
-          <div class="records-section">
-            <div v-if="clipboardStore.loading" class="loading">
+          <div class="records-section" ref="recordsSectionRef">
+            <div v-if="clipboardStore.loading && clipboardStore.records.length === 0" class="loading">
               <el-icon class="is-loading"><Loading /></el-icon>
               加载中...
             </div>
@@ -96,7 +96,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useClipboardStore } from '@/stores/clipboard'
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/Layout/AppHeader.vue'
@@ -109,21 +109,37 @@ const authStore = useAuthStore()
 
 const inputContent = ref('')
 const saving = ref(false)
+const deviceName = ref('')
+const recordsSectionRef = ref(null)
+let scrollTop = 0
 
-const deviceNameValue = computed({
-  get() {
-    const key = `cloudbox_device_name_${authStore.user?.id || 0}`
-    return localStorage.getItem(key) || ''
-  },
-  set(value) {
-    const key = `cloudbox_device_name_${authStore.user?.id || 0}`
-    localStorage.setItem(key, value)
+const DEVICE_NAME_KEY = 'cloudbox_device_name'
+
+function getDeviceNameKey() {
+  return DEVICE_NAME_KEY
+}
+
+onMounted(async () => {
+  // Load device name from localStorage
+  deviceName.value = localStorage.getItem(DEVICE_NAME_KEY) || ''
+  await clipboardStore.fetchRecords()
+  clipboardStore.startPolling()
+
+  // Save scroll position before polling updates
+  if (recordsSectionRef.value) {
+    recordsSectionRef.value.addEventListener('scroll', () => {
+      scrollTop = recordsSectionRef.value.scrollTop
+    })
   }
 })
 
-onMounted(async () => {
-  await clipboardStore.fetchRecords()
-  clipboardStore.startPolling()
+// Restore scroll position after records update
+watch(() => clipboardStore.records.length, () => {
+  nextTick(() => {
+    if (recordsSectionRef.value && scrollTop > 0) {
+      recordsSectionRef.value.scrollTop = scrollTop
+    }
+  })
 })
 
 onUnmounted(() => {
@@ -136,7 +152,7 @@ async function handleSave() {
     return
   }
 
-  if (!deviceNameValue.value) {
+  if (!deviceName.value) {
     ElMessage.error('请先设置设备名称')
     return
   }
@@ -153,16 +169,32 @@ async function handleSave() {
 }
 
 function handleSaveDeviceName() {
-  if (deviceNameValue.value) {
-    ElMessage.success('设备名称已保存')
+  if (deviceName.value) {
+    localStorage.setItem(DEVICE_NAME_KEY, deviceName.value)
+    ElMessage.success('设备名称已保存: ' + deviceName.value)
   }
 }
 
 async function handleCopy(record) {
   try {
-    await navigator.clipboard.writeText(record.content)
-    ElMessage.success('已复制到剪贴板')
+    // Try modern API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(record.content)
+      ElMessage.success('已复制到剪贴板')
+    } else {
+      // Fallback for older browsers or HTTP context
+      const textarea = document.createElement('textarea')
+      textarea.value = record.content
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      ElMessage.success('已复制到剪贴板')
+    }
   } catch (err) {
+    console.error('Copy failed:', err)
     ElMessage.error('复制失败')
   }
 }
