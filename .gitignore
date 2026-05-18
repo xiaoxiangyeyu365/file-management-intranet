@@ -1,8 +1,44 @@
-
 # Build artifacts
 cloudbox.exe
 cloudbox
+*.exe
 
 # Runtime data
 data/
 
+# Node modules
+web/node_modules/
+web/.vite/
+
+# Build output (rebuilt from source)
+static/assets/
+static/*.css
+static/*.js
+!static/index.html
+!static/favicon.ico
+!static/static.go
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+*.test
+coverage.txt
+
+# Test/debug scripts (not part of project)
+check_*.go
+cmd/debug/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
