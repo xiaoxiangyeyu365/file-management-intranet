@@ -4,7 +4,9 @@ package handler
 import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/response"
+	"io"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,7 +45,25 @@ func (h *UploadHandler) UploadChunk(c *gin.Context) {
 		return
 	}
 
-	err = h.uploadService.SaveChunk(c.Request.Context(), uploadID, chunkIndex, c.Request.Body)
+	// Handle multipart/form-data (from frontend) or raw binary
+	var reader io.Reader
+	contentType := c.GetHeader("Content-Type")
+
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		// Parse multipart form
+		file, _, err := c.Request.FormFile("chunk")
+		if err != nil {
+			response.BadRequest(c, "failed to get chunk from form data")
+			return
+		}
+		defer file.Close()
+		reader = file
+	} else {
+		// Raw binary data
+		reader = c.Request.Body
+	}
+
+	err = h.uploadService.SaveChunk(c.Request.Context(), uploadID, chunkIndex, reader)
 	if err != nil {
 		response.Error(c, 400, err.Error())
 		return

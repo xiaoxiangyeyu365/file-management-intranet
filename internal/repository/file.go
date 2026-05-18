@@ -4,7 +4,6 @@ package repository
 import (
 	"cloudbox/internal/model"
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -29,6 +28,9 @@ func (r *FileRepository) FindByID(ctx context.Context, id int64) (*model.File, e
 	if err != nil {
 		return nil, err
 	}
+	if file.ContentRef != 0 {
+		r.db.WithContext(ctx).First(&file.Physical, file.ContentRef)
+	}
 	return &file, nil
 }
 
@@ -40,6 +42,9 @@ func (r *FileRepository) FindByIDAndOwner(ctx context.Context, id, ownerID int64
 	if err != nil {
 		return nil, err
 	}
+	if file.ContentRef != 0 {
+		r.db.WithContext(ctx).First(&file.Physical, file.ContentRef)
+	}
 	return &file, nil
 }
 
@@ -48,7 +53,7 @@ func (r *FileRepository) FindByParentAndOwner(ctx context.Context, parentID, own
 		Where("owner_id = ?", ownerID)
 
 	if parentID == 0 {
-		query = query.Where("parent_id IS NULL")
+		query = query.Where("parent_id = 0 OR parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", parentID)
 	}
@@ -59,7 +64,17 @@ func (r *FileRepository) FindByParentAndOwner(ctx context.Context, parentID, own
 
 	var files []model.File
 	err := query.Order("is_folder DESC, name ASC").Find(&files).Error
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Manually load Physical for files that have one
+	for i := range files {
+		if files[i].ContentRef != 0 {
+			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+		}
+	}
+	return files, nil
 }
 
 func (r *FileRepository) FindByNameAndParent(ctx context.Context, ownerID, parentID int64, name string) (*model.File, error) {
@@ -67,7 +82,7 @@ func (r *FileRepository) FindByNameAndParent(ctx context.Context, ownerID, paren
 		Where("owner_id = ? AND name = ? AND deleted_at IS NULL", ownerID, name)
 
 	if parentID == 0 {
-		query = query.Where("parent_id IS NULL")
+		query = query.Where("parent_id = 0 OR parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", parentID)
 	}
@@ -76,6 +91,9 @@ func (r *FileRepository) FindByNameAndParent(ctx context.Context, ownerID, paren
 	err := query.First(&file).Error
 	if err != nil {
 		return nil, err
+	}
+	if file.ContentRef != 0 {
+		r.db.WithContext(ctx).First(&file.Physical, file.ContentRef)
 	}
 	return &file, nil
 }
@@ -86,7 +104,7 @@ func (r *FileRepository) ExistsByName(ctx context.Context, ownerID, parentID int
 		Where("owner_id = ? AND name = ? AND deleted_at IS NULL", ownerID, name)
 
 	if parentID == 0 {
-		query = query.Where("parent_id IS NULL")
+		query = query.Where("parent_id = 0 OR parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", parentID)
 	}
@@ -131,7 +149,17 @@ func (r *FileRepository) FindTrash(ctx context.Context, ownerID int64) ([]model.
 		Where("owner_id = ? AND deleted_at IS NOT NULL", ownerID).
 		Order("deleted_at DESC").
 		Find(&files).Error
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Manually load Physical for files that have one
+	for i := range files {
+		if files[i].ContentRef != 0 {
+			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+		}
+	}
+	return files, nil
 }
 
 func (r *FileRepository) Delete(ctx context.Context, id int64) error {
@@ -141,7 +169,6 @@ func (r *FileRepository) Delete(ctx context.Context, id int64) error {
 func (r *FileRepository) FindAllDescendants(ctx context.Context, parentID int64) ([]model.File, error) {
 	var files []model.File
 
-	// Recursive CTE to find all descendants
 	query := `
 		WITH RECURSIVE descendants AS (
 			SELECT * FROM files WHERE parent_id = ?
@@ -153,7 +180,17 @@ func (r *FileRepository) FindAllDescendants(ctx context.Context, parentID int64)
 	`
 
 	err := r.db.WithContext(ctx).Raw(query, parentID).Scan(&files).Error
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Manually load Physical for files that have one
+	for i := range files {
+		if files[i].ContentRef != 0 {
+			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+		}
+	}
+	return files, nil
 }
 
 func (r *FileRepository) BatchUpdateParent(ctx context.Context, fileIDs []int64, newParentID int64) error {
@@ -164,7 +201,6 @@ func (r *FileRepository) BatchUpdateParent(ctx context.Context, fileIDs []int64,
 }
 
 func (r *FileRepository) IsAncestor(ctx context.Context, fileID, targetID int64) (bool, error) {
-	// Check if targetID is an ancestor of fileID (circular reference check)
 	query := `
 		WITH RECURSIVE ancestors AS (
 			SELECT id, parent_id FROM files WHERE id = ?
@@ -181,38 +217,36 @@ func (r *FileRepository) IsAncestor(ctx context.Context, fileID, targetID int64)
 	return count > 0, err
 }
 
-func (r *FileRepository) PreloadPhysical(ctx context.Context, file *model.File) error {
-	return r.db.WithContext(ctx).
-		Preload("Physical").
-		First(file, file.ID).Error
+func NullInt64(v int64) model.NullInt64 {
+	return model.NullInt64{Int64: v, Valid: true}
 }
 
-func NullInt64(v int64) sql.NullInt64 {
-	return sql.NullInt64{Int64: v, Valid: true}
-}
-
-func NullInt64Ptr(v *int64) sql.NullInt64 {
+func NullInt64Ptr(v *int64) model.NullInt64 {
 	if v == nil {
-		return sql.NullInt64{Valid: false}
+		return model.NullInt64{}
 	}
-	return sql.NullInt64{Int64: *v, Valid: true}
+	return model.NullInt64{Int64: *v, Valid: true}
 }
 
-// Search searches files by keyword with optional folder scope and sorting
 func (r *FileRepository) Search(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error) {
 	var files []model.File
 
-	// Build base query
 	if folderID == nil {
-		// Global search
 		query := r.db.WithContext(ctx).
 			Where("owner_id = ? AND deleted_at IS NULL AND name LIKE ?", userID, "%"+keyword+"%")
 		query = r.applySearchSort(query, sort, keyword)
 		err := query.Find(&files).Error
-		return files, err
+		if err != nil {
+			return nil, err
+		}
+		for i := range files {
+			if files[i].ContentRef != 0 {
+				r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+			}
+		}
+		return files, nil
 	}
 
-	// Recursive search in folder and subfolders
 	query := `
 		WITH RECURSIVE subfolders AS (
 			SELECT id FROM files
@@ -229,12 +263,20 @@ func (r *FileRepository) Search(ctx context.Context, userID int64, keyword strin
 		  AND f.name LIKE ?
 	`
 
-	// Add ORDER BY clause
 	orderBy := r.buildSearchOrderBy(sort, keyword)
 	query += orderBy
 
 	err := r.db.WithContext(ctx).Raw(query, *folderID, userID, userID, userID, "%"+keyword+"%").Scan(&files).Error
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range files {
+		if files[i].ContentRef != 0 {
+			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+		}
+	}
+	return files, nil
 }
 
 func (r *FileRepository) applySearchSort(query *gorm.DB, sort, keyword string) *gorm.DB {
@@ -243,7 +285,7 @@ func (r *FileRepository) applySearchSort(query *gorm.DB, sort, keyword string) *
 		return query.Order("updated_at DESC")
 	case "name":
 		return query.Order("name ASC")
-	default: // relevance
+	default:
 		escapedKeyword := sanitizeSearchKeyword(keyword)
 		return query.Order(fmt.Sprintf(
 			"CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
@@ -257,16 +299,14 @@ func (r *FileRepository) buildSearchOrderBy(sort, keyword string) string {
 		return " ORDER BY updated_at DESC"
 	case "name":
 		return " ORDER BY name ASC"
-	default: // relevance - escape keyword to prevent SQL injection
+	default:
 		escapedKeyword := sanitizeSearchKeyword(keyword)
 		return fmt.Sprintf(" ORDER BY CASE WHEN name = '%s' THEN 0 WHEN name LIKE '%s%%' THEN 1 ELSE 2 END, name ASC",
 			escapedKeyword, escapedKeyword)
 	}
 }
 
-// sanitizeSearchKeyword escapes special characters to prevent SQL injection
 func sanitizeSearchKeyword(keyword string) string {
-	// Escape backslashes first, then single quotes, then LIKE wildcards
 	result := strings.ReplaceAll(keyword, "\\", "\\\\")
 	result = strings.ReplaceAll(result, "'", "''")
 	return result

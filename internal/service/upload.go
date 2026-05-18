@@ -8,6 +8,7 @@ import (
 	"cloudbox/internal/util/storage"
 	"context"
 	"crypto/md5"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -87,6 +88,11 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 	// Validate MD5 format
 	if err := validateMD5(req.MD5); err != nil {
 		return nil, err
+	}
+
+	// Validate file name
+	if req.FileName == "" {
+		return nil, errors.New("file name is required")
 	}
 
 	// Check for instant upload
@@ -290,12 +296,14 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 func (s *UploadService) createFileRecord(ctx context.Context, userID int64, fileName string, folderID int64, pf *model.PhysicalFile) (*model.File, error) {
 	file := &model.File{
 		Name:       fileName,
-		PhysicalID: repository.NullInt64(pf.ID),
-		ParentID:   repository.NullInt64(folderID),
+		ContentRef: pf.ID,
 		OwnerID:    userID,
 		IsFolder:   false,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
+	}
+	if folderID > 0 {
+		file.ParentID = sql.NullInt64{Int64: folderID, Valid: true}
 	}
 
 	if err := s.fileRepo.Create(ctx, file); err != nil {

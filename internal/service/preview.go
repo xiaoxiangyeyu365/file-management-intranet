@@ -103,11 +103,11 @@ func (s *PreviewService) GetMetadata(ctx context.Context, userID, fileID int64) 
 		return nil, ErrFileNotFound
 	}
 
-	if file.IsFolder || !file.PhysicalID.Valid {
+	if file.IsFolder || file.ContentRef == 0 {
 		return nil, ErrNotImage
 	}
 
-	pf, err := s.physicalRepo.FindByID(ctx, file.PhysicalID.Int64)
+	pf, err := s.physicalRepo.FindByID(ctx, file.ContentRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find physical file: %w", err)
 	}
