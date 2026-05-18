@@ -84,7 +84,7 @@ async function handleSubmit() {
   loading.value = true
   try {
     let newName = form.name
-    if (!props.file.is_folder && props.file.name.includes('.')) {
+    if (!props.file.isFolder && props.file.name.includes('.')) {
       const ext = '.' + props.file.name.split('.').pop()
       if (!form.name.endsWith(ext)) {
         newName = form.name + ext

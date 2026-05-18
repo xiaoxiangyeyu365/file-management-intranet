@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { uploadAPI } from '@/utils/api'
 import { useFilesStore } from './files'
 import MD5Worker from '@/utils/md5.worker.js?worker'
+import { ElMessageBox } from 'element-plus'
 
 const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 const MAX_CONCURRENT = 3
@@ -18,7 +19,7 @@ export const useUploadStore = defineStore('upload', {
     activeTasks: (state) => state.tasks.filter(t => t.status === 'uploading'),
     completedTasks: (state) => state.tasks.filter(t => t.status === 'completed'),
     failedTasks: (state) => state.tasks.filter(t => t.status === 'error'),
-    pendingTasks: (state) => state.tasks.filter(t => t.status === 'pending' || t.status === 'hashing'),
+    pendingTasks: (state) => state.tasks.filter(t => t.status === 'pending' || t.status === 'hashing' || t.status === 'confirming'),
     totalCount: (state) => state.tasks.length,
     activeCount: (state) => state.tasks.filter(t => t.status === 'uploading').length
   },
@@ -48,19 +49,51 @@ export const useUploadStore = defineStore('upload', {
         uploadedBytes: 0,
         error: null,
         uploadId: null,
-        md5: null
+        md5: null,
+        existingFile: null
       }
       this.tasks.push(task)
       this.worker.postMessage({ taskId, file })
       return taskId
     },
 
-    onMD5Calculated(taskId, md5) {
+    async onMD5Calculated(taskId, md5) {
       const task = this.tasks.find(t => t.id === taskId)
       if (!task) return
 
       task.md5 = md5
-      this.processUpload(task)
+
+      // Check if file already exists (by name in current folder)
+      const filesStore = useFilesStore()
+      const existing = await filesStore.checkFileExists(task.name, filesStore.currentFolder)
+
+      if (existing) {
+        task.existingFile = existing
+        task.status = 'confirming'
+
+        try {
+          await ElMessageBox.confirm(
+            `文件 "${task.name}" 已存在。\n\n请选择操作：\n• 覆盖：将重新上传并替换现有文件\n• 跳过：取消本次上传\n• 重命名：自动添加数字后缀上传`,
+            '文件已存在',
+            {
+              confirmButtonText: '覆盖',
+              cancelButtonText: '跳过',
+              distinguishCancelAndClose: true,
+              type: 'warning',
+              showInput: false
+            }
+          )
+          // User chose to overwrite - remove existing file first
+          await filesStore.deleteFile(existing.id)
+          this.processUpload(task)
+        } catch (action) {
+          // User cancelled or chose skip
+          task.status = 'cancelled'
+          this.removeTask(taskId)
+        }
+      } else {
+        this.processUpload(task)
+      }
     },
 
     async processUpload(task) {
@@ -68,19 +101,22 @@ export const useUploadStore = defineStore('upload', {
         task.status = 'pending'
         const response = await uploadAPI.init(task.md5, task.name, task.file.parentId || 0, task.size)
 
-        if (response.uploaded) {
+        // Backend returns {code:0, data:{uploadID, instant, chunkSize}}
+        const data = response?.data || response
+
+        if (data.instant) {
           task.status = 'completed'
           task.progress = 100
           this.refreshFiles()
           return
         }
 
-        task.uploadId = response.uploadId
+        task.uploadId = data.uploadID
         task.status = 'uploading'
         await this.uploadChunks(task)
       } catch (error) {
         task.status = 'error'
-        task.error = error.message || 'Upload failed'
+        task.error = error.message || error.response?.data?.message || 'Upload failed'
       }
     },
 
@@ -104,7 +140,7 @@ export const useUploadStore = defineStore('upload', {
 
         const start = chunkIndex * CHUNK_SIZE
         const end = Math.min(start + CHUNK_SIZE, task.size)
-        const chunk = task.slice(start, end)
+        const chunk = task.file.slice(start, end)
 
         try {
           await uploadAPI.uploadChunk(task.uploadId, chunkIndex, chunk)
@@ -123,7 +159,7 @@ export const useUploadStore = defineStore('upload', {
       }
 
       if (task.status !== 'cancelled' && completedChunks === totalChunks) {
-        await uploadAPI.complete(task.uploadId, task.name, task.file.parentId || 0)
+        await uploadAPI.complete(task.uploadId, task.name, task.file.parentId || 0, task.md5, task.size)
         task.status = 'completed'
         task.progress = 100
         this.refreshFiles()

@@ -18,53 +18,60 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="size" label="大小" width="120" sortable>
+      <el-table-column label="大小" width="120" sortable>
         <template #default="{ row }">
-          <span v-if="row.is_folder">-</span>
-          <span v-else>{{ formatSize(row.size) }}</span>
+          <span v-if="row.isFolder">-</span>
+          <span v-else>{{ formatSize(row.physical?.size || 0) }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column prop="updated_at" label="修改时间" width="180" sortable>
+      <el-table-column label="修改时间" width="180" sortable>
         <template #default="{ row }">
-          {{ formatDate(row.updated_at) }}
+          <span v-if="row.updatedAt && row.updatedAt !== '0001-01-01T00:00:00Z'">{{ formatDate(row.updatedAt) }}</span>
+          <span v-else>-</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
-          <el-dropdown trigger="click" @command="handleCommand($event, row)">
-            <el-button text size="small">
-              <el-icon><MoreFilled /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="rename">
-                  <el-icon><Edit /></el-icon>
-                  重命名
-                </el-dropdown-item>
-                <el-dropdown-item command="download">
-                  <el-icon><Download /></el-icon>
-                  下载
-                </el-dropdown-item>
-                <el-dropdown-item command="move">
-                  <el-icon><Right /></el-icon>
-                  移动
-                </el-dropdown-item>
-                <el-dropdown-item command="delete" divided>
-                  <el-icon><Delete /></el-icon>
-                  删除
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <el-button text size="small" @click.stop="showContextMenu($event, row)">
+            <el-icon><MoreFilled /></el-icon>
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- Context Menu -->
+    <teleport to="body">
+      <div
+        v-if="contextMenuVisible"
+        class="context-menu"
+        :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+        @click.stop
+      >
+        <div class="context-menu-item" @click="handleRename">
+          <el-icon><Edit /></el-icon>
+          <span>重命名</span>
+        </div>
+        <div class="context-menu-item" @click="handleDownload">
+          <el-icon><Download /></el-icon>
+          <span>下载</span>
+        </div>
+        <div class="context-menu-item" @click="handleMove">
+          <el-icon><Right /></el-icon>
+          <span>移动</span>
+        </div>
+        <div class="context-menu-item danger" @click="handleDelete">
+          <el-icon><Delete /></el-icon>
+          <span>删除</span>
+        </div>
+      </div>
+    </teleport>
   </div>
 </template>
 
 <script setup>
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
 import { MoreFilled, Edit, Download, Right, Delete } from '@element-plus/icons-vue'
@@ -80,8 +87,60 @@ const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'dele
 
 const filesStore = useFilesStore()
 
+// Context menu state
+const contextMenuVisible = ref(false)
+const contextMenuFile = ref(null)
+const contextMenuPos = ref({ x: 0, y: 0 })
+
+function showContextMenu(event, file) {
+  contextMenuFile.value = file
+  contextMenuPos.value = { x: event.clientX, y: event.clientY }
+  contextMenuVisible.value = true
+}
+
+function hideContextMenu() {
+  contextMenuVisible.value = false
+  contextMenuFile.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', hideContextMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', hideContextMenu)
+})
+
+function handleRename() {
+  if (contextMenuFile.value) {
+    emit('rename', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleDownload() {
+  if (contextMenuFile.value) {
+    emit('download', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleMove() {
+  if (contextMenuFile.value) {
+    emit('move', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleDelete() {
+  if (contextMenuFile.value) {
+    emit('delete', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
 function getFileIcon(file) {
-  if (file.is_folder) return '📁'
+  if (file.isFolder) return '📁'
   const ext = file.name.split('.').pop().toLowerCase()
   if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return '🖼️'
   if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return '🎬'
@@ -93,7 +152,7 @@ function getFileIcon(file) {
 }
 
 function handleClick(file) {
-  if (file.is_folder) {
+  if (file.isFolder) {
     emit('open', file)
   } else {
     emit('preview', file)
@@ -101,7 +160,7 @@ function handleClick(file) {
 }
 
 function handleDoubleClick(row) {
-  if (row.is_folder) {
+  if (row.isFolder) {
     emit('open', row)
   } else {
     emit('preview', row)
@@ -110,23 +169,6 @@ function handleDoubleClick(row) {
 
 function handleSelectionChange(selection) {
   filesStore.setSelected(selection.map(f => f.id))
-}
-
-function handleCommand(command, file) {
-  switch (command) {
-    case 'rename':
-      emit('rename', file)
-      break
-    case 'download':
-      emit('download', file)
-      break
-    case 'move':
-      emit('move', file)
-      break
-    case 'delete':
-      emit('delete', file)
-      break
-  }
 }
 </script>
 
@@ -152,6 +194,33 @@ function handleCommand(command, file) {
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+    }
+  }
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 120px;
+
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #f5f7fa;
+    }
+
+    &.danger {
+      color: #f56c6c;
     }
   }
 }

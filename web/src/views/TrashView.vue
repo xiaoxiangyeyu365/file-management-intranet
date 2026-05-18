@@ -51,7 +51,7 @@
             <el-table-column label="名称" min-width="300">
               <template #default="{ row }">
                 <div class="file-name">
-                  <span class="file-icon">{{ row.is_folder ? '📁' : '📄' }}</span>
+                  <span class="file-icon">{{ row.isFolder ? '📁' : '📄' }}</span>
                   <span>{{ row.name }}</span>
                 </div>
               </template>
@@ -59,7 +59,7 @@
 
             <el-table-column label="删除时间" width="180">
               <template #default="{ row }">
-                {{ formatDate(row.deleted_at) }}
+                {{ row.deletedAt?.Valid ? formatDate(row.deletedAt.Time) : '-' }}
               </template>
             </el-table-column>
 
@@ -92,6 +92,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { trashAPI } from '@/utils/api'
 import { formatDate } from '@/utils/format'
 import AppHeader from '@/components/Layout/AppHeader.vue'
@@ -99,6 +100,7 @@ import AppSidebar from '@/components/Layout/AppSidebar.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const route = useRoute()
 const trashFiles = ref([])
 const selectedFiles = ref([])
 const showEmptyConfirm = ref(false)
@@ -108,10 +110,17 @@ onMounted(() => {
   fetchTrash()
 })
 
+// Reload data when route changes (e.g., when navigating to /trash)
+import { onBeforeRouteUpdate } from 'vue-router'
+onBeforeRouteUpdate(() => {
+  fetchTrash()
+})
+
 async function fetchTrash() {
   loading.value = true
   try {
-    trashFiles.value = await trashAPI.list()
+    const response = await trashAPI.list()
+    trashFiles.value = response?.data?.files || []
   } catch (err) {
     ElMessage.error('加载回收站失败')
   } finally {

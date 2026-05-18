@@ -14,9 +14,11 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async login(username, password) {
       const response = await authAPI.login(username, password)
-      this.token = response.token
-      this.user = response.user
-      localStorage.setItem('cloudbox_token', response.token)
+      // Interceptor returns {code, message, data}; actual payload in .data
+      const data = response.data || response
+      this.token = data.token
+      this.user = { id: data.userId || 1, username: username }
+      localStorage.setItem('cloudbox_token', data.token)
       return response
     },
 
@@ -31,12 +33,19 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async fetchProfile() {
-      if (!this.token) return null
+      if (!this.token) {
+        console.log('fetchProfile: no token')
+        return null
+      }
       try {
-        const user = await authAPI.profile()
-        this.user = user
-        return user
+        console.log('fetchProfile: calling API')
+        const response = await authAPI.profile()
+        console.log('fetchProfile response:', response)
+        const userData = response.data || response
+        this.user = { id: userData.id || 1, username: userData.username }
+        return this.user
       } catch (error) {
+        console.error('fetchProfile error:', error)
         this.logout()
         return null
       }

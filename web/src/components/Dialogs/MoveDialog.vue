@@ -70,11 +70,11 @@ const loading = ref(false)
 
 const folderTree = computed(() => {
   const allFiles = filesStore.files.concat(filesStore.searchResults)
-  const folders = allFiles.filter(f => f.is_folder)
+  const folders = allFiles.filter(f => f.isFolder)
 
   const buildTree = (parentId) => {
     return folders
-      .filter(f => f.parent_id === parentId)
+      .filter(f => f.parentId === parentId || (parentId === 0 && (f.parentId === 0 || !f.parentId)))
       .map(f => ({
         ...f,
         children: buildTree(f.id)

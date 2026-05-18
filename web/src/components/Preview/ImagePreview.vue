@@ -13,16 +13,24 @@
         <el-icon><Close /></el-icon>
       </button>
 
-      <div class="image-wrapper">
-        <img :src="imageUrl" :alt="file?.name" @load="handleImageLoad" />
+      <div v-if="loading" class="loading-state">
+        <el-icon class="is-loading"><Loading /></el-icon>
+      </div>
+
+      <div v-else-if="error" class="error-state">
+        {{ error }}
+      </div>
+
+      <div v-else class="image-wrapper">
+        <img :src="blobUrl" :alt="file?.name" @load="handleImageLoad" />
       </div>
 
       <div v-if="file" class="image-info">
         <div class="file-name">{{ file.name }}</div>
         <div class="file-meta">
           <span v-if="dimensions">{{ dimensions }}</span>
-          <span v-if="dimensions && file.size"> • </span>
-          <span>{{ formatSize(file.size) }}</span>
+          <span v-if="dimensions && file.physical?.size"> • </span>
+          <span>{{ formatSize(file.physical?.size || 0) }}</span>
         </div>
       </div>
     </div>
@@ -30,10 +38,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { fileAPI, previewAPI } from '@/utils/api'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { previewAPI } from '@/utils/api'
 import { formatSize } from '@/utils/format'
-import { Close } from '@element-plus/icons-vue'
+import { Close, Loading } from '@element-plus/icons-vue'
 
 const props = defineProps({
   modelValue: {
@@ -48,28 +56,67 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'closed'])
 
+const blobUrl = ref('')
 const dimensions = ref('')
+const loading = ref(false)
+const error = ref('')
 
 const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
 
-const imageUrl = computed(() => {
-  if (!props.file) return ''
-  return fileAPI.downloadUrl(props.file.id) + '?t=' + Date.now()
-})
-
 watch(() => props.file, async (file) => {
-  if (file && !file.is_folder) {
+  if (file && !file.isFolder) {
+    // Fetch image with auth header
+    loading.value = true
+    error.value = ''
+    try {
+      const token = localStorage.getItem('cloudbox_token')
+      const url = `/api/files/${file.id}/download?t=${Date.now()}`
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!response.ok) {
+        throw new Error('加载图片失败')
+      }
+      const blob = await response.blob()
+      blobUrl.value = URL.createObjectURL(blob)
+    } catch (e) {
+      error.value = e.message || '加载图片失败'
+      blobUrl.value = ''
+    } finally {
+      loading.value = false
+    }
+
+    // Fetch metadata for dimensions
     try {
       const info = await previewAPI.get(file.id)
-      if (info.width && info.height) {
-        dimensions.value = `${info.width} × ${info.height}`
+      const data = info?.data || info
+      if (data.width && data.height) {
+        dimensions.value = `${data.width} × ${data.height}`
+      } else {
+        dimensions.value = ''
       }
     } catch {
       dimensions.value = ''
     }
+  }
+}, { immediate: true })
+
+watch(visible, (val) => {
+  if (!val) {
+    // Clean up blob URL when dialog closes
+    if (blobUrl.value) {
+      URL.revokeObjectURL(blobUrl.value)
+      blobUrl.value = ''
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  if (blobUrl.value) {
+    URL.revokeObjectURL(blobUrl.value)
   }
 })
 
@@ -78,7 +125,12 @@ function handleClose() {
 }
 
 function handleClosed() {
+  if (blobUrl.value) {
+    URL.revokeObjectURL(blobUrl.value)
+    blobUrl.value = ''
+  }
   dimensions.value = ''
+  error.value = ''
   emit('closed')
 }
 
@@ -105,6 +157,20 @@ function handleImageLoad(event) {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.loading-state,
+.error-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 200px;
+  min-height: 200px;
+  color: white;
+}
+
+.error-state {
+  color: #ff6b6b;
 }
 
 .close-btn {

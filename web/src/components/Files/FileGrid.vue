@@ -7,13 +7,44 @@
       :class="{ selected: selectedIds.includes(file.id) }"
       @click="handleClick(file)"
       @dblclick="handleDoubleClick(file)"
+      @contextmenu.prevent="showContextMenu($event, file)"
     >
       <div class="file-preview">
         <span class="file-icon">{{ getFileIcon(file) }}</span>
       </div>
       <div class="file-name" :title="file.name">{{ file.name }}</div>
-      <div class="file-size">{{ file.is_folder ? '' : formatSize(file.size) }}</div>
+      <div class="file-meta">
+        <span class="file-size">{{ file.isFolder ? '' : formatSize(file.physical?.size || 0) }}</span>
+        <span class="file-time" v-if="file.updatedAt && file.updatedAt !== '0001-01-01T00:00:00Z'">{{ formatDate(file.updatedAt) }}</span>
+      </div>
     </div>
+
+    <!-- Context Menu - Single component at component level -->
+    <teleport to="body">
+      <div
+        v-if="contextMenuVisible"
+        class="context-menu"
+        :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+        @click.stop
+      >
+        <div class="context-menu-item" @click="handleRename">
+          <el-icon><Edit /></el-icon>
+          <span>重命名</span>
+        </div>
+        <div class="context-menu-item" @click="handleDownload">
+          <el-icon><Download /></el-icon>
+          <span>下载</span>
+        </div>
+        <div class="context-menu-item" @click="handleMove">
+          <el-icon><Right /></el-icon>
+          <span>移动</span>
+        </div>
+        <div class="context-menu-item danger" @click="handleDelete">
+          <el-icon><Delete /></el-icon>
+          <span>删除</span>
+        </div>
+      </div>
+    </teleport>
 
     <div v-if="files.length === 0" class="empty-state">
       <el-empty description="暂无文件" />
@@ -22,9 +53,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
-import { formatSize } from '@/utils/format'
+import { formatSize, formatDate } from '@/utils/format'
+import { Edit, Download, Right, Delete } from '@element-plus/icons-vue'
 
 const props = defineProps({
   files: {
@@ -38,8 +70,60 @@ const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'dele
 const filesStore = useFilesStore()
 const selectedIds = computed(() => filesStore.selectedIds)
 
+// Context menu state
+const contextMenuVisible = ref(false)
+const contextMenuFile = ref(null)
+const contextMenuPos = ref({ x: 0, y: 0 })
+
+function showContextMenu(event, file) {
+  contextMenuFile.value = file
+  contextMenuPos.value = { x: event.clientX, y: event.clientY }
+  contextMenuVisible.value = true
+}
+
+function hideContextMenu() {
+  contextMenuVisible.value = false
+  contextMenuFile.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', hideContextMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', hideContextMenu)
+})
+
+function handleRename() {
+  if (contextMenuFile.value) {
+    emit('rename', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleDownload() {
+  if (contextMenuFile.value) {
+    emit('download', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleMove() {
+  if (contextMenuFile.value) {
+    emit('move', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleDelete() {
+  if (contextMenuFile.value) {
+    emit('delete', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
 function getFileIcon(file) {
-  if (file.is_folder) return '📁'
+  if (file.isFolder) return '📁'
   const ext = file.name.split('.').pop().toLowerCase()
   if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return '🖼️'
   if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return '🎬'
@@ -58,7 +142,7 @@ function handleClick(file) {
 }
 
 function handleDoubleClick(file) {
-  if (file.is_folder) {
+  if (file.isFolder) {
     emit('open', file)
   } else {
     emit('preview', file)
@@ -74,6 +158,7 @@ function handleDoubleClick(file) {
   padding: 16px;
 
   .file-card {
+    position: relative;
     padding: 16px;
     border-radius: 8px;
     cursor: pointer;
@@ -109,17 +194,54 @@ function handleDoubleClick(file) {
       white-space: nowrap;
     }
 
+    .file-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      margin-top: 4px;
+    }
+
+    .file-size, .file-time {
+      font-size: 11px;
+      color: #909399;
+    }
+
     .file-size {
       font-size: 12px;
-      color: #909399;
-      text-align: center;
-      margin-top: 4px;
     }
   }
 
   .empty-state {
     grid-column: 1 / -1;
     padding: 48px;
+  }
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 120px;
+
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #f5f7fa;
+    }
+
+    &.danger {
+      color: #f56c6c;
+    }
   }
 }
 </style>

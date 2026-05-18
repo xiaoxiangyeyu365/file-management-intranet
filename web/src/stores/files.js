@@ -17,21 +17,28 @@ export const useFilesStore = defineStore('files', {
   }),
 
   getters: {
-    folders: (state) => state.files.filter(f => f.is_folder),
-    filesOnly: (state) => state.files.filter(f => !f.is_folder)
+    folders: (state) => state.files.filter(f => f.isFolder),
+    filesOnly: (state) => state.files.filter(f => !f.isFolder)
   },
 
   actions: {
     async fetchFiles(folderId = 0) {
       this.loading = true
       try {
-        const files = await fileAPI.list(folderId)
-        this.files = files
+        console.log('fetchFiles called with folderId:', folderId)
+        const response = await fileAPI.list(folderId)
+        console.log('fetchFiles response:', response)
+        // Backend returns {code:0, data:{files:[]}}
+        const data = response?.data || response
+        console.log('fetchFiles data:', data)
+        this.files = data.files || []
         this.currentFolder = folderId
         this.selectedIds = []
         this.searchKeyword = ''
         this.searchResults = []
         this.isSearching = false
+      } catch (err) {
+        console.error('fetchFiles error:', err)
       } finally {
         this.loading = false
       }
@@ -51,18 +58,31 @@ export const useFilesStore = defineStore('files', {
       this.searchSort = sort
 
       try {
-        this.searchResults = await fileAPI.search(keyword, folderId, sort)
+        const response = await fileAPI.search(keyword, folderId, sort)
+        const data = response?.data || response
+        this.searchResults = data.files || data || []
       } finally {
         this.loading = false
       }
     },
 
     async createFolder(parentId, name) {
-      const newFolder = await folderAPI.create(parentId, name)
+      const response = await folderAPI.create(parentId, name)
+      const data = response?.data || response
       if (parentId === this.currentFolder) {
-        this.files.push(newFolder)
+        this.files.push(data)
       }
-      return newFolder
+      return data
+    },
+
+    async checkFileExists(name, parentId = null) {
+      const targetFolder = parentId !== null ? parentId : this.currentFolder
+      try {
+        const response = await fileAPI.lookup(targetFolder, name)
+        return response?.data || response
+      } catch {
+        return null
+      }
     },
 
     async renameFile(fileId, newName) {
@@ -89,14 +109,84 @@ export const useFilesStore = defineStore('files', {
       }
     },
 
-    downloadFile(fileId) {
+    async downloadFile(fileId) {
+      const token = localStorage.getItem('cloudbox_token')
       const url = fileAPI.downloadUrl(fileId)
-      window.open(url, '_blank')
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const contentType = response.headers.get('content-type')
+
+      // Check if response is an error JSON
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json()
+        if (data.code !== 0) {
+          console.error('Download failed:', data.message)
+          return
+        }
+      }
+
+      if (response.ok) {
+        const blob = await response.blob()
+        const disposition = response.headers.get('Content-Disposition')
+        let filename = `download-${fileId}`
+        if (disposition) {
+          // RFC 5987 format: filename*=UTF-8''encoded_name or filename="plain_name"
+          const parts = disposition.split("'")
+          if (parts.length >= 3) {
+            // filename*=UTF-8''name format
+            filename = decodeURIComponent(parts[2])
+          } else {
+            // filename="plain_name" format
+            const match = disposition.match(/filename="?([^;"']+)/)
+            if (match) filename = match[1]
+          }
+        }
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(a.href)
+      }
     },
 
-    downloadFolder(folderId) {
+    async downloadFolder(folderId) {
+      const token = localStorage.getItem('cloudbox_token')
       const url = folderAPI.downloadUrl(folderId)
-      window.open(url, '_blank')
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const contentType = response.headers.get('content-type')
+
+      // Check if response is an error JSON
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json()
+        if (data.code !== 0) {
+          console.error('Download failed:', data.message)
+          return
+        }
+      }
+
+      if (response.ok) {
+        const blob = await response.blob()
+        const disposition = response.headers.get('Content-Disposition')
+        let filename = `folder-${folderId}.zip`
+        if (disposition) {
+          // RFC 5987 format: filename*=UTF-8''name
+          const parts = disposition.split("'")
+          if (parts.length >= 3) {
+            filename = decodeURIComponent(parts[2])
+          } else {
+            const match = disposition.match(/filename="?([^;"']+)/)
+            if (match) filename = match[1]
+          }
+        }
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(a.href)
+      }
     },
 
     toggleViewMode() {

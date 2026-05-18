@@ -37,12 +37,20 @@
                 :files="filesStore.searchResults"
                 @open="handleOpenFolder"
                 @preview="handlePreviewFile"
+                @download="handleDownloadFile"
+                @rename="handleRename"
+                @move="handleMove"
+                @delete="handleDelete"
               />
               <FileList
                 v-else
                 :files="filesStore.searchResults"
                 @open="handleOpenFolder"
                 @preview="handlePreviewFile"
+                @download="handleDownloadFile"
+                @rename="handleRename"
+                @move="handleMove"
+                @delete="handleDelete"
               />
             </div>
           </template>
@@ -53,12 +61,20 @@
               :files="filesStore.files"
               @open="handleOpenFolder"
               @preview="handlePreviewFile"
+              @download="handleDownloadFile"
+              @rename="handleRename"
+              @move="handleMove"
+              @delete="handleDelete"
             />
             <FileList
               v-else
               :files="filesStore.files"
               @open="handleOpenFolder"
               @preview="handlePreviewFile"
+              @download="handleDownloadFile"
+              @rename="handleRename"
+              @move="handleMove"
+              @delete="handleDelete"
             />
           </template>
         </div>
@@ -205,6 +221,15 @@ function handleOpenFolder(folder) {
   filesStore.navigateToFolder(folder)
 }
 
+// Download
+function handleDownloadFile(file) {
+  if (file.isFolder) {
+    filesStore.downloadFolder(file.id)
+  } else {
+    filesStore.downloadFile(file.id)
+  }
+}
+
 // Preview
 function handlePreviewFile(file) {
   const ext = file.name.split('.').pop().toLowerCase()
@@ -216,6 +241,23 @@ function handlePreviewFile(file) {
   } else {
     filesStore.downloadFile(file.id)
   }
+}
+
+// File actions
+function handleRename(file) {
+  selectedFile.value = file
+  showRename.value = true
+}
+
+function handleMove(file) {
+  selectedFiles.value = [file]
+  showMove.value = true
+}
+
+function handleDelete(file) {
+  selectedFile.value = file
+  selectedFiles.value = [file]
+  showDeleteConfirm.value = true
 }
 
 // Dialog handlers

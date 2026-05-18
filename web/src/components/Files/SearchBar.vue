@@ -18,7 +18,7 @@
       style="width: 140px; margin-left: 8px"
       @change="handleSearch"
     >
-      <el-option label="全局搜索" :value="null" />
+      <el-option label="全局搜索" :value="0" />
       <el-option label="当前文件夹" :value="currentFolder" />
     </el-select>
 
@@ -43,7 +43,7 @@ import { Search } from '@element-plus/icons-vue'
 const filesStore = useFilesStore()
 
 const keyword = ref('')
-const scope = ref(null)
+const scope = ref(0)
 const sort = ref('relevance')
 const currentFolder = ref(0)
 
@@ -53,7 +53,9 @@ function handleSearch() {
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     if (keyword.value.trim()) {
-      filesStore.searchFiles(keyword.value, scope.value, sort.value)
+      // scope 0 means global search, currentFolder means search in folder
+      const searchScope = scope.value === 0 ? null : scope.value
+      filesStore.searchFiles(keyword.value, searchScope, sort.value)
     } else {
       filesStore.searchResults = []
       filesStore.isSearching = false
@@ -63,7 +65,7 @@ function handleSearch() {
 
 watch(() => filesStore.currentFolder, (newVal) => {
   currentFolder.value = newVal
-  scope.value = null
+  scope.value = 0
 })
 </script>
 
