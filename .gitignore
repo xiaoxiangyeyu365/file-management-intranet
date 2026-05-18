@@ -28,9 +28,11 @@ static/*.js
 .DS_Store
 Thumbs.db
 
-# Go
-*.test
-coverage.txt
+# Claude Code
+.claude/
+
+# Superpowers plugin
+.superpowers/
 
 # Test/debug scripts (not part of project)
 check_*.go
