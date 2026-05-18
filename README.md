@@ -162,4 +162,4 @@ admin:
 
 ## 许可证
 
-MIT License
+EPL-1.0 License
