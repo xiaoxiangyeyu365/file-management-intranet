@@ -3,6 +3,7 @@ import { uploadAPI } from '@/utils/api'
 import { useFilesStore } from './files'
 import MD5Worker from '@/utils/md5.worker.js?worker'
 import { ElMessageBox } from 'element-plus'
+import SparkMD5 from 'spark-md5'
 
 const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 const MAX_CONCURRENT = 3
@@ -26,12 +27,29 @@ export const useUploadStore = defineStore('upload', {
 
   actions: {
     initWorker() {
-      if (!this.worker) {
+      if (this.worker) return
+      try {
+        // Check if workers are supported
+        if (typeof Worker === 'undefined') {
+          console.warn('Web Workers not supported, using main thread')
+          return
+        }
         this.worker = new MD5Worker()
         this.worker.onmessage = (e) => {
-          const { taskId, md5 } = e.data
-          this.onMD5Calculated(taskId, md5)
+          const { taskId, md5, error } = e.data
+          if (error) {
+            this.onMD5Error(taskId, error)
+          } else {
+            this.onMD5Calculated(taskId, md5)
+          }
         }
+        this.worker.onerror = (e) => {
+          console.error('MD5 Worker error:', e)
+          this.worker = null
+        }
+      } catch (err) {
+        console.error('Failed to create MD5 worker:', err)
+        this.worker = null
       }
     },
 
@@ -53,8 +71,56 @@ export const useUploadStore = defineStore('upload', {
         existingFile: null
       }
       this.tasks.push(task)
-      this.worker.postMessage({ taskId, file })
+      console.log('Upload task added:', task.name, 'Size:', task.size, 'Worker available:', !!this.worker)
+      // Try worker first, fall back to main thread
+      if (this.worker) {
+        this.worker.postMessage({ taskId, file })
+      } else {
+        console.log('Using main thread for MD5 calculation')
+        // Fallback: calculate MD5 on main thread
+        this.calculateMD5MainThread(task, file)
+      }
       return taskId
+    },
+
+    async calculateMD5MainThread(task, file) {
+      try {
+        const spark = new SparkMD5.ArrayBuffer()
+        const chunkSize = 2 * 1024 * 1024
+        const chunks = Math.ceil(file.size / chunkSize)
+        const reader = new FileReader()
+
+        const readChunk = (index) => {
+          return new Promise((resolve, reject) => {
+            reader.onload = (e) => {
+              spark.append(e.target.result)
+              resolve()
+            }
+            reader.onerror = reject
+            const start = index * chunkSize
+            const end = Math.min(start + chunkSize, file.size)
+            reader.readAsArrayBuffer(file.slice(start, end))
+          })
+        }
+
+        for (let i = 0; i < chunks; i++) {
+          await readChunk(i)
+        }
+
+        const md5 = spark.end()
+        this.onMD5Calculated(task.id, md5)
+      } catch (err) {
+        console.error('MD5 calculation failed:', err)
+        task.status = 'error'
+        task.error = 'MD5 计算失败'
+      }
+    },
+
+    onMD5Error(taskId, error) {
+      const task = this.tasks.find(t => t.id === taskId)
+      if (!task) return
+      task.status = 'error'
+      task.error = error || 'MD5 计算失败'
     },
 
     async onMD5Calculated(taskId, md5) {

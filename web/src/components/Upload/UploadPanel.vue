@@ -75,6 +75,14 @@ function handleClearCompleted() {
   z-index: 100;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
 
+  // Mobile: full screen overlay
+  @media (max-width: 768px) {
+    width: 100%;
+    left: 0;
+    border-left: none;
+    border-top: 1px solid #e4e7ed;
+  }
+
   &.collapsed {
     width: auto;
 
@@ -83,6 +91,11 @@ function handleClearCompleted() {
       writing-mode: vertical-rl;
       text-orientation: mixed;
       cursor: pointer;
+
+      @media (max-width: 768px) {
+        writing-mode: horizontal-tb;
+        padding: 8px 16px;
+      }
     }
 
     .panel-title {
