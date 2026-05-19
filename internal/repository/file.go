@@ -4,6 +4,7 @@ package repository
 import (
 	"cloudbox/internal/model"
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -217,15 +218,15 @@ func (r *FileRepository) IsAncestor(ctx context.Context, fileID, targetID int64)
 	return count > 0, err
 }
 
-func NullInt64(v int64) model.NullInt64 {
-	return model.NullInt64{Int64: v, Valid: true}
+func NullInt64(v int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: v, Valid: true}
 }
 
-func NullInt64Ptr(v *int64) model.NullInt64 {
+func NullInt64Ptr(v *int64) sql.NullInt64 {
 	if v == nil {
-		return model.NullInt64{}
+		return sql.NullInt64{}
 	}
-	return model.NullInt64{Int64: *v, Valid: true}
+	return sql.NullInt64{Int64: *v, Valid: true}
 }
 
 func (r *FileRepository) Search(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error) {
