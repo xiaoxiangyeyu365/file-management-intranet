@@ -34,6 +34,15 @@ type MoveRequest struct {
 	TargetFolderID int64   `json:"targetFolderId" binding:"required"`
 }
 
+// ListFiles godoc
+// @Summary 获取文件列表
+// @Description 获取指定文件夹下的文件和子文件夹
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param folderId query int false "文件夹ID，0表示根目录"
+// @Success 200 {object} map[string]interface{} "文件列表"
+// @Router /api/files [get]
 func (h *FileHandler) ListFiles(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -54,6 +63,16 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 	})
 }
 
+// GetFile godoc
+// @Summary 获取文件详情
+// @Description 根据文件ID获取文件详细信息
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "文件信息"
+// @Failure 404 {object} map[string]interface{} "文件不存在"
+// @Router /api/files/{id} [get]
 func (h *FileHandler) GetFile(c *gin.Context) {
 	userID := GetUserID(c)
 	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -71,6 +90,17 @@ func (h *FileHandler) GetFile(c *gin.Context) {
 	response.Success(c, file)
 }
 
+// LookupFile godoc
+// @Summary 查找文件
+// @Description 根据文件名和父文件夹ID查找文件
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param parentId query int false "父文件夹ID"
+// @Param name query string true "文件名"
+// @Success 200 {object} map[string]interface{} "文件信息"
+// @Failure 404 {object} map[string]interface{} "文件不存在"
+// @Router /api/files/lookup [get]
 func (h *FileHandler) LookupFile(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -100,6 +130,57 @@ func (h *FileHandler) LookupFile(c *gin.Context) {
 	response.Success(c, file)
 }
 
+// SearchFiles godoc
+// @Summary 搜索文件
+// @Description 根据关键词搜索文件名
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Param keyword query string true "搜索关键词"
+// @Param folderId query int false "限定文件夹ID"
+// @Param sort query string false "排序方式(relevance/name/size/time)"
+// @Success 200 {object} map[string]interface{} "搜索结果"
+// @Router /api/files/search [get]
+func (h *FileHandler) SearchFiles(c *gin.Context) {
+	userID := GetUserID(c)
+	keyword := c.Query("keyword")
+
+	if keyword == "" {
+		response.BadRequest(c, "keyword is required")
+		return
+	}
+
+	folderIDStr := c.Query("folderId")
+	var folderID *int64
+	if folderIDStr != "" {
+		id, _ := strconv.ParseInt(folderIDStr, 10, 64)
+		folderID = &id
+	}
+
+	sort := c.DefaultQuery("sort", "relevance")
+
+	files, err := h.fileService.SearchFiles(c.Request.Context(), userID, keyword, folderID, sort)
+	if err != nil {
+		response.InternalError(c, "failed to search files")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"files": files,
+	})
+}
+
+// CreateFolder godoc
+// @Summary 创建文件夹
+// @Description 在指定位置创建新文件夹
+// @Tags folders
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateFolderRequest true "文件夹信息"
+// @Success 200 {object} map[string]interface{} "创建的文件夹信息"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Router /api/folders [post]
 func (h *FileHandler) CreateFolder(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -127,6 +208,18 @@ func (h *FileHandler) CreateFolder(c *gin.Context) {
 	response.Success(c, folder)
 }
 
+// RenameFile godoc
+// @Summary 重命名文件
+// @Description 修改文件或文件夹的名称
+// @Tags files
+// @Accept json
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Param request body RenameRequest true "新名称"
+// @Success 200 {object} map[string]interface{} "重命名成功"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Failure 404 {object} map[string]interface{} "文件不存在"
+// @Router /api/files/{id} [put]
 func (h *FileHandler) RenameFile(c *gin.Context) {
 	userID := GetUserID(c)
 	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -154,6 +247,15 @@ func (h *FileHandler) RenameFile(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// DeleteFile godoc
+// @Summary 删除文件
+// @Description 将文件移至回收站（软删除）
+// @Tags files
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "删除成功"
+// @Failure 404 {object} map[string]interface{} "文件不存在"
+// @Router /api/files/{id} [delete]
 func (h *FileHandler) DeleteFile(c *gin.Context) {
 	userID := GetUserID(c)
 	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -281,36 +383,4 @@ func (h *FileHandler) DownloadFolder(c *gin.Context) {
 		// Headers already sent, can only log error
 		log.Printf("error streaming folder zip: %v", err)
 	}
-}
-
-func (h *FileHandler) SearchFiles(c *gin.Context) {
-	userID := GetUserID(c)
-
-	keyword := c.Query("keyword")
-	if keyword == "" {
-		response.BadRequest(c, "keyword is required")
-		return
-	}
-
-	var folderID *int64
-	if folderIDStr := c.Query("folderId"); folderIDStr != "" {
-		id, err := strconv.ParseInt(folderIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "invalid folderId")
-			return
-		}
-		folderID = &id
-	}
-
-	sort := c.Query("sort")
-
-	files, err := h.fileService.SearchFiles(c.Request.Context(), userID, keyword, folderID, sort)
-	if err != nil {
-		response.InternalError(c, "failed to search files")
-		return
-	}
-
-	response.Success(c, gin.H{
-		"files": files,
-	})
 }

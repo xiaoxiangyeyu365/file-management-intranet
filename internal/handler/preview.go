@@ -21,6 +21,17 @@ func NewPreviewHandler(previewService *service.PreviewService, fileService *serv
 	}
 }
 
+// GetMetadata godoc
+// @Summary 获取文件元数据
+// @Description 获取图片文件的元数据信息
+// @Tags preview
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "文件元数据"
+// @Failure 400 {object} map[string]interface{} "不是图片文件"
+// @Failure 404 {object} map[string]interface{} "文件不存在"
+// @Router /api/files/{id}/metadata [get]
 func (h *PreviewHandler) GetMetadata(c *gin.Context) {
 	userID := GetUserID(c)
 	fileID, err := strconv.ParseInt(c.Param("id"), 10, 64)

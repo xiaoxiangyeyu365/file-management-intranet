@@ -26,6 +26,14 @@ type UpdatePinRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
+// List clipboard records
+// @Summary 获取剪切板记录
+// @Description 获取当前用户的云剪切板记录列表
+// @Tags clipboard
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{} "剪切板记录列表"
+// @Router /api/clipboard [get]
 func (h *ClipboardHandler) List(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -45,6 +53,17 @@ func (h *ClipboardHandler) List(c *gin.Context) {
 	})
 }
 
+// Create clipboard record
+// @Summary 保存到剪切板
+// @Description 将文本内容保存到云剪切板
+// @Tags clipboard
+// @Accept json
+// @Security BearerAuth
+// @Param request body CreateClipboardRequest true "剪切板内容"
+// @Param X-Device-Name header string false "设备名称"
+// @Success 200 {object} map[string]interface{} "保存成功"
+// @Failure 400 {object} map[string]interface{} "内容为空或超过限制"
+// @Router /api/clipboard [post]
 func (h *ClipboardHandler) Create(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -83,6 +102,17 @@ func (h *ClipboardHandler) Create(c *gin.Context) {
 	response.Success(c, record.ToResponse())
 }
 
+// UpdatePin clipboard record
+// @Summary 设置置顶
+// @Description 设置或取消剪切板记录的置顶状态
+// @Tags clipboard
+// @Accept json
+// @Security BearerAuth
+// @Param id path int true "记录ID"
+// @Param request body UpdatePinRequest true "置顶状态"
+// @Success 200 {object} map[string]interface{} "操作成功"
+// @Failure 404 {object} map[string]interface{} "记录不存在"
+// @Router /api/clipboard/{id}/pin [patch]
 func (h *ClipboardHandler) UpdatePin(c *gin.Context) {
 	userID := GetUserID(c)
 	recordID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -106,6 +136,15 @@ func (h *ClipboardHandler) UpdatePin(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// Delete clipboard record
+// @Summary 删除记录
+// @Description 删除指定的剪切板记录
+// @Tags clipboard
+// @Security BearerAuth
+// @Param id path int true "记录ID"
+// @Success 200 {object} map[string]interface{} "删除成功"
+// @Failure 404 {object} map[string]interface{} "记录不存在"
+// @Router /api/clipboard/{id} [delete]
 func (h *ClipboardHandler) Delete(c *gin.Context) {
 	userID := GetUserID(c)
 	recordID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -123,6 +162,14 @@ func (h *ClipboardHandler) Delete(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// Clear clipboard records
+// @Summary 清空剪切板
+// @Description 清空当前用户的剪切板记录
+// @Tags clipboard
+// @Security BearerAuth
+// @Param onlyUnpinned query bool false "仅清空非置顶记录，默认true"
+// @Success 200 {object} map[string]interface{} "清空成功"
+// @Router /api/clipboard [delete]
 func (h *ClipboardHandler) Clear(c *gin.Context) {
 	userID := GetUserID(c)
 

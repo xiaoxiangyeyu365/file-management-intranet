@@ -19,6 +19,17 @@ func NewUploadHandler(uploadService *service.UploadService) *UploadHandler {
 	return &UploadHandler{uploadService: uploadService}
 }
 
+// InitUpload godoc
+// @Summary 初始化上传
+// @Description 初始化分片上传，返回 uploadID 和分片大小
+// @Tags upload
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body service.InitUploadRequest true "上传参数"
+// @Success 200 {object} map[string]interface{} "初始化成功"
+// @Failure 400 {object} map[string]interface{} "参数错误"
+// @Router /api/upload/init [post]
 func (h *UploadHandler) InitUpload(c *gin.Context) {
 	userID := GetUserID(c)
 
@@ -37,6 +48,18 @@ func (h *UploadHandler) InitUpload(c *gin.Context) {
 	response.Success(c, resp)
 }
 
+// UploadChunk godoc
+// @Summary 上传分片
+// @Description 上传文件的单个分片
+// @Tags upload
+// @Accept multipart/form-data, application/octet-stream
+// @Security BearerAuth
+// @Param uploadID path string true "上传ID"
+// @Param index path int true "分片索引"
+// @Param chunk formData file false "分片文件"
+// @Success 200 {object} map[string]interface{} "上传成功"
+// @Failure 400 {object} map[string]interface{} "上传失败"
+// @Router /api/upload/{uploadID}/chunk/{index} [put]
 func (h *UploadHandler) UploadChunk(c *gin.Context) {
 	uploadID := c.Param("uploadID")
 	chunkIndex, err := strconv.Atoi(c.Param("index"))
@@ -72,6 +95,16 @@ func (h *UploadHandler) UploadChunk(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// GetProgress godoc
+// @Summary 获取上传进度
+// @Description 获取当前分片上传的进度
+// @Tags upload
+// @Produce json
+// @Security BearerAuth
+// @Param uploadID path string true "上传ID"
+// @Success 200 {object} map[string]interface{} "上传进度"
+// @Failure 404 {object} map[string]interface{} "上传不存在"
+// @Router /api/upload/{uploadID}/progress [get]
 func (h *UploadHandler) GetProgress(c *gin.Context) {
 	uploadID := c.Param("uploadID")
 
