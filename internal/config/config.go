@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,8 +30,13 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Type string `yaml:"type"`
-	Path string `yaml:"path"`
+	Type     string `yaml:"type"` // "sqlite" or "mysql"
+	Path     string `yaml:"path"` // For SQLite only
+	Host     string `yaml:"host"` // For MySQL
+	Port     int    `yaml:"port"` // For MySQL
+	Username string `yaml:"username"` // For MySQL
+	Password string `yaml:"password"` // For MySQL
+	Name     string `yaml:"name"` // For MySQL (database name)
 }
 
 type StorageConfig struct {
@@ -73,8 +79,12 @@ func Load() *Config {
 				Port: 8080,
 			},
 			Database: DatabaseConfig{
-				Type: "sqlite",
-				Path: "./data/cloudbox.db",
+				Type:     "mysql",
+				Host:     "localhost",
+				Port:     3306,
+				Username: "root",
+				Password: "",
+				Name:     "cloudbox",
 			},
 			Storage: StorageConfig{
 				Root:       "./data/files",
@@ -128,14 +138,17 @@ func Load() *Config {
 			cfg.JWT.Secret = generateRandomKey()
 		}
 
-		// Convert to absolute paths
+		// Get base directory: executable directory or current working directory
 		exePath, err := os.Executable()
-		if err != nil {
-			log.Fatalf("failed to get executable path: %v", err)
+		exeDir := ""
+		if err == nil {
+			exeDir = filepath.Dir(exePath)
 		}
-		exeDir := filepath.Dir(exePath)
+		// For "go run", executable is in temp dir, use cwd instead
+		if strings.Contains(exeDir, "go-build") || exeDir == "" {
+			exeDir, _ = os.Getwd()
+		}
 
-		cfg.Database.Path = toAbsPath(exeDir, cfg.Database.Path)
 		cfg.Storage.Root = toAbsPath(exeDir, cfg.Storage.Root)
 		cfg.Storage.Temp = toAbsPath(exeDir, cfg.Storage.Temp)
 		cfg.Storage.Thumbnails = toAbsPath(exeDir, cfg.Storage.Thumbnails)

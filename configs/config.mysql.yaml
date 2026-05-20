@@ -1,0 +1,33 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  type: "mysql"           # sqlite or mysql
+  host: "localhost"       # MySQL host
+  port: 3306              # MySQL port
+  username: "root"        # MySQL username
+  password: "1234" # MySQL password
+  name: "cloudbox"        # Database name
+
+storage:
+  root: "./data/files"
+  temp: "./data/temp"
+  thumbnails: "./data/thumbnails"
+
+upload:
+  chunk_size: 5242880
+  max_concurrent: 3
+  temp_expire: 24h
+
+jwt:
+  secret: "change-this-in-production"
+  expire: 24h
+
+log:
+  level: "info"
+  file: "./data/logs/cloudbox.log"
+
+admin:
+  username: "admin"
+  password: "admin123"

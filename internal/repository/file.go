@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -123,13 +124,13 @@ func (r *FileRepository) SoftDelete(ctx context.Context, id int64) error {
 	return r.db.WithContext(ctx).
 		Model(&model.File{}).
 		Where("id = ?", id).
-		Update("deleted_at", gorm.Expr("datetime('now')")).Error
+		Update("deleted_at", time.Now()).Error
 }
 
 func (r *FileRepository) Restore(ctx context.Context, id int64, newParentID *int64, newName string) error {
 	updates := map[string]interface{}{
 		"deleted_at": nil,
-		"updated_at": gorm.Expr("datetime('now')"),
+		"updated_at": time.Now(),
 	}
 	if newParentID != nil {
 		updates["parent_id"] = *newParentID
