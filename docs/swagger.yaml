@@ -1,0 +1,707 @@
+definitions:
+  handler.ChangePasswordRequest:
+    properties:
+      newPassword:
+        minLength: 6
+        type: string
+      oldPassword:
+        type: string
+    required:
+    - newPassword
+    - oldPassword
+    type: object
+  handler.CreateClipboardRequest:
+    properties:
+      content:
+        type: string
+      deviceName:
+        type: string
+    required:
+    - content
+    type: object
+  handler.CreateFolderRequest:
+    properties:
+      name:
+        type: string
+      parentId:
+        type: integer
+    required:
+    - name
+    type: object
+  handler.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  handler.RenameRequest:
+    properties:
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  handler.UpdatePinRequest:
+    properties:
+      pinned:
+        type: boolean
+    type: object
+  service.InitUploadRequest:
+    properties:
+      fileName:
+        type: string
+      fileSize:
+        type: integer
+      md5:
+        type: string
+      targetFolderId:
+        type: integer
+    type: object
+info:
+  contact: {}
+paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: 使用用户名密码登录，返回 JWT token
+      parameters:
+      - description: 登录信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 登录成功，返回 token
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 用户名或密码错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 用户登录
+      tags:
+      - auth
+  /api/auth/logout:
+    post:
+      description: JWT 无状态，单纯返回成功
+      responses:
+        "200":
+          description: 登出成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 用户登出
+      tags:
+      - auth
+  /api/auth/password:
+    post:
+      consumes:
+      - application/json
+      description: 修改当前用户的密码
+      parameters:
+      - description: 密码信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 修改成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 修改密码
+      tags:
+      - auth
+  /api/auth/profile:
+    get:
+      description: 获取当前登录用户的基本信息
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 用户信息
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 未授权
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取用户信息
+      tags:
+      - auth
+  /api/clipboard:
+    delete:
+      description: 清空当前用户的剪切板记录
+      parameters:
+      - description: 仅清空非置顶记录，默认true
+        in: query
+        name: onlyUnpinned
+        type: boolean
+      responses:
+        "200":
+          description: 清空成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 清空剪切板
+      tags:
+      - clipboard
+    get:
+      description: 获取当前用户的云剪切板记录列表
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 剪切板记录列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取剪切板记录
+      tags:
+      - clipboard
+    post:
+      consumes:
+      - application/json
+      description: 将文本内容保存到云剪切板
+      parameters:
+      - description: 剪切板内容
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateClipboardRequest'
+      - description: 设备名称
+        in: header
+        name: X-Device-Name
+        type: string
+      responses:
+        "200":
+          description: 保存成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 内容为空或超过限制
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 保存到剪切板
+      tags:
+      - clipboard
+  /api/clipboard/{id}:
+    delete:
+      description: 删除指定的剪切板记录
+      parameters:
+      - description: 记录ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 记录不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除记录
+      tags:
+      - clipboard
+  /api/clipboard/{id}/pin:
+    patch:
+      consumes:
+      - application/json
+      description: 设置或取消剪切板记录的置顶状态
+      parameters:
+      - description: 记录ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 置顶状态
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdatePinRequest'
+      responses:
+        "200":
+          description: 操作成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 记录不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 设置置顶
+      tags:
+      - clipboard
+  /api/files:
+    get:
+      description: 获取指定文件夹下的文件和子文件夹
+      parameters:
+      - description: 文件夹ID，0表示根目录
+        in: query
+        name: folderId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 文件列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取文件列表
+      tags:
+      - files
+  /api/files/{id}:
+    delete:
+      description: 将文件移至回收站（软删除）
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除文件
+      tags:
+      - files
+    get:
+      description: 根据文件ID获取文件详细信息
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 文件信息
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取文件详情
+      tags:
+      - files
+    put:
+      consumes:
+      - application/json
+      description: 修改文件或文件夹的名称
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 新名称
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.RenameRequest'
+      responses:
+        "200":
+          description: 重命名成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 重命名文件
+      tags:
+      - files
+  /api/files/{id}/metadata:
+    get:
+      description: 获取图片文件的元数据信息
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 文件元数据
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 不是图片文件
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取文件元数据
+      tags:
+      - preview
+  /api/files/lookup:
+    get:
+      description: 根据文件名和父文件夹ID查找文件
+      parameters:
+      - description: 父文件夹ID
+        in: query
+        name: parentId
+        type: integer
+      - description: 文件名
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 文件信息
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 查找文件
+      tags:
+      - files
+  /api/files/search:
+    get:
+      description: 根据关键词搜索文件名
+      parameters:
+      - description: 搜索关键词
+        in: query
+        name: keyword
+        required: true
+        type: string
+      - description: 限定文件夹ID
+        in: query
+        name: folderId
+        type: integer
+      - description: 排序方式(relevance/name/size/time)
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 搜索结果
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 搜索文件
+      tags:
+      - files
+  /api/folders:
+    post:
+      consumes:
+      - application/json
+      description: 在指定位置创建新文件夹
+      parameters:
+      - description: 文件夹信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateFolderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建的文件夹信息
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 创建文件夹
+      tags:
+      - folders
+  /api/trash:
+    delete:
+      description: 清空当前用户回收站中的所有文件
+      responses:
+        "200":
+          description: 清空成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 清空回收站
+      tags:
+      - trash
+    get:
+      description: 获取当前用户回收站中的文件列表
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 回收站文件列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取回收站列表
+      tags:
+      - trash
+  /api/trash/{id}:
+    delete:
+      description: 永久删除回收站中的文件，无法恢复
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 永久删除
+      tags:
+      - trash
+  /api/trash/{id}/restore:
+    post:
+      description: 从回收站恢复指定文件到原位置
+      parameters:
+      - description: 文件ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: 恢复成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 文件不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 恢复文件
+      tags:
+      - trash
+  /api/upload/{uploadID}/chunk/{index}:
+    put:
+      consumes:
+      - multipart/form-data
+      - ' application/octet-stream'
+      description: 上传文件的单个分片
+      parameters:
+      - description: 上传ID
+        in: path
+        name: uploadID
+        required: true
+        type: string
+      - description: 分片索引
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: 分片文件
+        in: formData
+        name: chunk
+        type: file
+      responses:
+        "200":
+          description: 上传成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 上传失败
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 上传分片
+      tags:
+      - upload
+  /api/upload/{uploadID}/progress:
+    get:
+      description: 获取当前分片上传的进度
+      parameters:
+      - description: 上传ID
+        in: path
+        name: uploadID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 上传进度
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 上传不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取上传进度
+      tags:
+      - upload
+  /api/upload/init:
+    post:
+      consumes:
+      - application/json
+      description: 初始化分片上传，返回 uploadID 和分片大小
+      parameters:
+      - description: 上传参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/service.InitUploadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 初始化成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 初始化上传
+      tags:
+      - upload
+  /health:
+    get:
+      description: 服务健康状态检查，用于监控和负载均衡探测
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 服务正常
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 健康检查
+      tags:
+      - system
+swagger: "2.0"
