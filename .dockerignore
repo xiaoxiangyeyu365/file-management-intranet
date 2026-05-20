@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts (keep cloudbox Linux binary for Docker!)
+cloudbox.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+
+# Documentation (include swagger docs for API docs)
+*.md
+!Docker/README.md
+
+# Development files
+.env
+.env.*
+Makefile
+
+# Data (should be volumes)
+data/
+
+# Node modules and web source (not needed for Docker build)
+web/
+node_modules/
+web/node_modules/
+
+# Temp files
+*.log
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db

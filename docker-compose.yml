@@ -1,0 +1,59 @@
+# Docker Compose configuration for CloudBox with MySQL
+
+services:
+  cloudbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cloudbox:latest
+    container_name: cloudbox
+    ports:
+      - "8080:8080"
+    volumes:
+      - cloudbox-files:/app/data/files
+      - cloudbox-temp:/app/data/temp
+      - cloudbox-thumbnails:/app/data/thumbnails
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cloudbox-network
+
+  db:
+    image: mysql:8.0
+    container_name: cloudbox-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: cloudbox123
+      MYSQL_DATABASE: cloudbox
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    volumes:
+      - cloudbox-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cloudbox-network
+    restart: unless-stopped
+
+volumes:
+  cloudbox-files:
+  cloudbox-temp:
+  cloudbox-thumbnails:
+  cloudbox-mysql:
+    driver: local
+
+networks:
+  cloudbox-network:
+    driver: bridge
