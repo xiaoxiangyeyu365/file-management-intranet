@@ -111,43 +111,16 @@ export const useFilesStore = defineStore('files', {
 
     async downloadFile(fileId) {
       const token = localStorage.getItem('cloudbox_token')
-      const url = fileAPI.downloadUrl(fileId)
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      const contentType = response.headers.get('content-type')
-
-      // Check if response is an error JSON
-      if (contentType && contentType.includes('application/json')) {
-        const data = await response.json()
-        if (data.code !== 0) {
-          console.error('Download failed:', data.message)
-          return
-        }
+      console.log('Download - token from localStorage:', token ? 'exists (' + token.length + ' chars)' : 'NULL')
+      if (!token) {
+        console.error('No token found, please login first')
+        return
       }
 
-      if (response.ok) {
-        const blob = await response.blob()
-        const disposition = response.headers.get('Content-Disposition')
-        let filename = `download-${fileId}`
-        if (disposition) {
-          // RFC 5987 format: filename*=UTF-8''encoded_name or filename="plain_name"
-          const parts = disposition.split("'")
-          if (parts.length >= 3) {
-            // filename*=UTF-8''name format
-            filename = decodeURIComponent(parts[2])
-          } else {
-            // filename="plain_name" format
-            const match = disposition.match(/filename="?([^;"']+)/)
-            if (match) filename = match[1]
-          }
-        }
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(blob)
-        a.download = filename
-        a.click()
-        URL.revokeObjectURL(a.href)
-      }
+      // window.open triggers browser download via Content-Disposition: attachment
+      // Works for cross-origin and large files (no in-memory blob).
+      const downloadUrl = `/api/files/${fileId}/download?token=${encodeURIComponent(token)}`
+      window.open(downloadUrl, '_blank')
     },
 
     async downloadFolder(folderId) {

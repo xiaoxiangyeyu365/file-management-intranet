@@ -10,21 +10,29 @@ import (
 
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var token string
+
+		// Try Authorization header first
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+
+		// Fall back to query parameter (for cross-origin downloads)
+		if token == "" {
+			token = c.Query("token")
+		}
+
+		if token == "" {
 			response.Unauthorized(c, "missing authorization header")
 			c.Abort()
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			response.Unauthorized(c, "invalid authorization header")
-			c.Abort()
-			return
-		}
-
-		claims, err := crypto.ParseToken(parts[1])
+		claims, err := crypto.ParseToken(token)
 		if err != nil {
 			response.Unauthorized(c, "invalid or expired token")
 			c.Abort()
