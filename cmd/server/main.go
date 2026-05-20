@@ -4,14 +4,19 @@ package main
 import (
 	"cloudbox/internal/config"
 	"cloudbox/internal/handler"
+	"cloudbox/internal/middleware"
 	"cloudbox/internal/repository"
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/storage"
 	"cloudbox/static"
 	"fmt"
 	"log"
+	"time"
 
+	_ "cloudbox/docs" // Swagger docs
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func main() {
@@ -53,6 +58,7 @@ func main() {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Device-Name")
+		c.Header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length")
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
@@ -62,64 +68,74 @@ func main() {
 		c.Next()
 	})
 
+	// Request logging middleware
+	r.Use(middleware.Logger())
+
+	// Health check (no auth required)
+	r.GET("/health", handler.HealthCheck)
+
 	// API routes
 	api := r.Group("/api")
+
+	// Rate limiting for auth routes (100 requests per minute per IP)
+	auth := api.Group("/auth")
+	auth.Use(middleware.RateLimit(100, time.Minute))
 	{
-		// Auth routes (no JWT required)
-		auth := api.Group("/auth")
-		{
-			auth.POST("/login", authHandler.Login)
-		}
+		auth.POST("/login", authHandler.Login)
+	}
 
-		// Protected routes
-		protected := api.Group("")
-		protected.Use(handler.JWTMiddleware())
-		{
-			// Auth
-			protected.POST("/auth/password", authHandler.ChangePassword)
-			protected.POST("/auth/logout", authHandler.Logout)
-			protected.GET("/auth/profile", authHandler.GetProfile)
+	// Protected routes
+	protected := api.Group("")
+	protected.Use(handler.JWTMiddleware())
+	{
+		// Auth
+		protected.POST("/auth/password", authHandler.ChangePassword)
+		protected.POST("/auth/logout", authHandler.Logout)
+		protected.GET("/auth/profile", authHandler.GetProfile)
 
-			// Files
-			protected.GET("/files", fileHandler.ListFiles)
-			protected.GET("/files/search", fileHandler.SearchFiles)  // Must be before /files/:id
-			protected.GET("/files/lookup", fileHandler.LookupFile)
-			protected.GET("/files/:id", fileHandler.GetFile)
-			protected.GET("/files/:id/download", fileHandler.DownloadFile)
-			protected.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
-			protected.GET("/files/:id/metadata", previewHandler.GetMetadata)
-			protected.PUT("/files/:id", fileHandler.RenameFile)
-			protected.DELETE("/files/:id", fileHandler.DeleteFile)
-			protected.PATCH("/files/move", fileHandler.MoveFiles)
+		// Files
+		protected.GET("/files", fileHandler.ListFiles)
+		protected.GET("/files/search", fileHandler.SearchFiles)  // Must be before /files/:id
+		protected.GET("/files/lookup", fileHandler.LookupFile)
+		protected.GET("/files/:id", fileHandler.GetFile)
+		protected.GET("/files/:id/download", fileHandler.DownloadFile)
+		protected.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
+		protected.GET("/files/:id/metadata", previewHandler.GetMetadata)
+		protected.PUT("/files/:id", fileHandler.RenameFile)
+		protected.DELETE("/files/:id", fileHandler.DeleteFile)
+		protected.PATCH("/files/move", fileHandler.MoveFiles)
 
-			// Folders
-			protected.POST("/folders", fileHandler.CreateFolder)
-			protected.GET("/folders/:id/download", fileHandler.DownloadFolder)
+		// Folders
+		protected.POST("/folders", fileHandler.CreateFolder)
+		protected.GET("/folders/:id/download", fileHandler.DownloadFolder)
 
-			// Trash
-			protected.GET("/trash", trashHandler.ListTrash)
-			protected.POST("/trash/:id/restore", trashHandler.RestoreFile)
-			protected.DELETE("/trash/:id", trashHandler.PermanentDelete)
-			protected.DELETE("/trash", trashHandler.EmptyTrash)
+		// Trash
+		protected.GET("/trash", trashHandler.ListTrash)
+		protected.POST("/trash/:id/restore", trashHandler.RestoreFile)
+		protected.DELETE("/trash/:id", trashHandler.PermanentDelete)
+		protected.DELETE("/trash", trashHandler.EmptyTrash)
 
-			// Clipboard
-			protected.GET("/clipboard", clipboardHandler.List)
-			protected.POST("/clipboard", clipboardHandler.Create)
-			protected.PATCH("/clipboard/:id/pin", clipboardHandler.UpdatePin)
-			protected.DELETE("/clipboard/:id", clipboardHandler.Delete)
-			protected.DELETE("/clipboard", clipboardHandler.Clear)
+		// Clipboard
+		protected.GET("/clipboard", clipboardHandler.List)
+		protected.POST("/clipboard", clipboardHandler.Create)
+		protected.PATCH("/clipboard/:id/pin", clipboardHandler.UpdatePin)
+		protected.DELETE("/clipboard/:id", clipboardHandler.Delete)
+		protected.DELETE("/clipboard", clipboardHandler.Clear)
 
-			// Upload
-			protected.POST("/upload/init", uploadHandler.InitUpload)
-			protected.PUT("/upload/:uploadID/chunk/:index", uploadHandler.UploadChunk)
-			protected.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
-			protected.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
-			protected.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
-		}
+		// Upload
+		protected.POST("/upload/init", uploadHandler.InitUpload)
+		protected.PUT("/upload/:uploadID/chunk/:index", uploadHandler.UploadChunk)
+		protected.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
+		protected.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
+		protected.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
 	}
 
 	// Serve static files (must be after API routes)
 	r.Static("/assets", "./static/assets")
+
+	// Swagger documentation
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	r.NoRoute(func(c *gin.Context) {
 		data, err := static.StaticFiles.ReadFile("index.html")
 		if err != nil {
