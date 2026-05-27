@@ -75,3 +75,16 @@ func GetRole(c *gin.Context) string {
 	}
 	return role.(string)
 }
+
+// AdminMiddleware requires the authenticated user to have admin role.
+func AdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists || role.(string) != "admin" {
+			response.Forbidden(c, "admin access required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

@@ -54,3 +54,10 @@ func InternalError(c *gin.Context, message string) {
 		Message: message,
 	})
 }
+
+func Forbidden(c *gin.Context, message string) {
+	c.JSON(http.StatusForbidden, Response{
+		Code:    403,
+		Message: message,
+	})
+}

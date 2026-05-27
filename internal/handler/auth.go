@@ -21,6 +21,11 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type RegisterRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
 	NewPassword string `json:"newPassword" binding:"required,min=6"`
@@ -46,11 +51,60 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	resp, err := h.authService.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
-		response.Error(c, 401, err.Error())
+		if err == service.ErrAccountPending {
+			response.Error(c, 401, "账号待审批，请联系管理员")
+			return
+		}
+		if err == service.ErrAccountDisabled {
+			response.Error(c, 401, "账号已被禁用")
+			return
+		}
+		response.Error(c, 401, "用户名或密码错误")
 		return
 	}
 
 	response.Success(c, resp)
+}
+
+// Register godoc
+// @Summary 用户注册
+// @Description 新用户注册，需等待管理员审批
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body RegisterRequest true "注册信息"
+// @Success 200 {object} map[string]interface{} "注册成功"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Failure 403 {object} map[string]interface{} "注册已关闭"
+// @Router /api/auth/register [post]
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request")
+		return
+	}
+
+	err := h.authService.Register(c.Request.Context(), req.Username, req.Password)
+	if err != nil {
+		if err == service.ErrRegistrationClosed {
+			response.Error(c, 403, "registration is disabled")
+			return
+		}
+		if err == service.ErrInvalidUsername {
+			response.BadRequest(c, "username must be 3-50 alphanumeric characters")
+			return
+		}
+		if err == service.ErrUsernameExists {
+			response.BadRequest(c, "username already exists")
+			return
+		}
+		response.InternalError(c, "registration failed")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"message": "注册成功，等待管理员审批",
+	})
 }
 
 // ChangePassword godoc
