@@ -313,3 +313,11 @@ func sanitizeSearchKeyword(keyword string) string {
 	result = strings.ReplaceAll(result, "'", "''")
 	return result
 }
+
+func (r *FileRepository) FindAllByOwner(ctx context.Context, ownerID int64) ([]model.File, error) {
+	var files []model.File
+	err := r.db.WithContext(ctx).
+		Where("owner_id = ?", ownerID).
+		Find(&files).Error
+	return files, err
+}
