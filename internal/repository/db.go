@@ -47,6 +47,10 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to migrate database: %v", err)
 	}
 
+	// Ensure existing users have status and password_changed set
+	DB.Exec("UPDATE users SET status = 'approved' WHERE status IS NULL OR status = ''")
+	DB.Exec("UPDATE users SET password_changed = 1 WHERE password_changed IS NULL")
+
 	// Create files table (GORM doesn't handle it well with custom fields)
 	if err := createFilesTable(); err != nil {
 		log.Fatalf("failed to create files table: %v", err)
