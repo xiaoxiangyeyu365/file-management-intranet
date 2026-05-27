@@ -54,6 +54,10 @@
         :closable="false"
         style="margin-top: 16px"
       />
+
+      <div class="login-footer">
+        <router-link to="/register">注册新账号</router-link>
+      </div>
     </div>
   </div>
 </template>
@@ -94,7 +98,10 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    await authStore.login(form.username, form.password)
+    const data = await authStore.login(form.username, form.password)
+    if (data.requirePasswordChange) {
+      ElMessage.warning('请修改默认密码')
+    }
     router.push('/')
   } catch (err) {
     error.value = err.response?.data?.message || '登录失败，请检查用户名和密码'
@@ -135,6 +142,21 @@ async function handleLogin() {
   p {
     color: #666;
     font-size: 14px;
+  }
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 14px;
+
+  a {
+    color: #409eff;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 </style>
