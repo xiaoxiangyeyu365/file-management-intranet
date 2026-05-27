@@ -39,6 +39,7 @@ api.interceptors.response.use(
 // Auth API
 export const authAPI = {
   login: (username, password) => api.post('/auth/login', { username, password }),
+  register: (username, password) => api.post('/auth/register', { username, password }),
   changePassword: (oldPassword, newPassword) =>
     api.post('/auth/password', { oldPassword, newPassword }),
   logout: () => api.post('/auth/logout'),
@@ -113,6 +114,17 @@ export const clipboardAPI = {
   clear: (onlyUnpinned = true) => api.delete('/clipboard', {
     params: { onlyUnpinned: onlyUnpinned.toString() }
   })
+}
+
+// Admin API
+export const adminAPI = {
+  listUsers: (status = '') => api.get('/admin/users', { params: { status } }),
+  createUser: (username, password, role = 'user') =>
+    api.post('/admin/users', { username, password, role }),
+  updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
+  resetPassword: (id, newPassword) =>
+    api.put(`/admin/users/${id}/password`, { newPassword }),
+  deleteUser: (id) => api.delete(`/admin/users/${id}`)
 }
 
 export default api
