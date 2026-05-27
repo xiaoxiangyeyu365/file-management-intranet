@@ -4,12 +4,20 @@ import LoginView from '@/views/LoginView.vue'
 import FilesView from '@/views/FilesView.vue'
 import TrashView from '@/views/TrashView.vue'
 import ClipboardView from '@/views/ClipboardView.vue'
+import RegisterView from '@/views/RegisterView.vue'
+import AdminUsersView from '@/views/AdminUsersView.vue'
 
 const routes = [
   {
     path: '/login',
     name: 'Login',
     component: LoginView,
+    meta: { guest: true }
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: RegisterView,
     meta: { guest: true }
   },
   {
@@ -29,6 +37,12 @@ const routes = [
     name: 'Clipboard',
     component: ClipboardView,
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/admin/users',
+    name: 'AdminUsers',
+    component: AdminUsersView,
+    meta: { requiresAuth: true, requiresAdmin: true }
   }
 ]
 
@@ -40,13 +54,14 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
-  // Try to restore session
   if (authStore.token && !authStore.user) {
     await authStore.fetchProfile()
   }
 
   if (to.meta.requiresAuth && !authStore.token) {
     next('/login')
+  } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    next('/')
   } else if (to.meta.guest && authStore.user) {
     next('/')
   } else {

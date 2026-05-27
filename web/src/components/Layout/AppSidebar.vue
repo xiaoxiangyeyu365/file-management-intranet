@@ -27,15 +27,27 @@
         <el-icon><Document /></el-icon>
         <span>云剪切板</span>
       </router-link>
+
+      <router-link
+        v-if="authStore.isAdmin"
+        to="/admin/users"
+        class="nav-item"
+        :class="{ active: route.path.startsWith('/admin') }"
+      >
+        <el-icon><User /></el-icon>
+        <span>用户管理</span>
+      </router-link>
     </nav>
   </aside>
 </template>
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { Folder, Delete, Document } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { Folder, Delete, Document, User } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const authStore = useAuthStore()
 </script>
 
 <style scoped lang="scss">
