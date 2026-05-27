@@ -22,6 +22,7 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	Log      LogConfig      `yaml:"log"`
 	Admin    AdminConfig    `yaml:"admin"`
+	Auth     AuthConfig     `yaml:"auth"`
 }
 
 type ServerConfig struct {
@@ -66,6 +67,11 @@ type AdminConfig struct {
 	Password string `yaml:"password"`
 }
 
+type AuthConfig struct {
+	Registration     bool `yaml:"registration"`
+	ApprovalRequired bool `yaml:"approval_required"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -106,6 +112,10 @@ func Load() *Config {
 			Admin: AdminConfig{
 				Username: "admin",
 				Password: "admin123",
+			},
+			Auth: AuthConfig{
+				Registration:     true,
+				ApprovalRequired: true,
 			},
 		}
 
