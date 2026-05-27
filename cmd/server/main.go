@@ -50,6 +50,10 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	clipboardHandler := handler.NewClipboardHandler(clipboardService)
 
+	// Initialize admin service and handler
+	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService)
+	adminHandler := handler.NewAdminHandler(adminService)
+
 	// Setup Gin
 	r := gin.Default()
 
@@ -82,6 +86,7 @@ func main() {
 	auth.Use(middleware.RateLimit(100, time.Minute))
 	{
 		auth.POST("/login", authHandler.Login)
+		auth.POST("/register", authHandler.Register)
 	}
 
 	// Protected routes
@@ -128,6 +133,17 @@ func main() {
 		protected.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
 		protected.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
 		protected.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
+	}
+
+	// Admin routes
+	admin := api.Group("/admin")
+	admin.Use(handler.JWTMiddleware(), handler.AdminMiddleware())
+	{
+		admin.GET("/users", adminHandler.ListUsers)
+		admin.POST("/users", adminHandler.CreateUser)
+		admin.PUT("/users/:id", adminHandler.UpdateUser)
+		admin.PUT("/users/:id/password", adminHandler.ResetPassword)
+		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 	}
 
 	// Serve static files (must be after API routes)
