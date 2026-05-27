@@ -14,6 +14,11 @@ var (
 	ErrInvalidCredentials = errors.New("invalid username or password")
 	ErrUserNotFound       = errors.New("user not found")
 	ErrSamePassword       = errors.New("new password must be different")
+	ErrAccountPending     = errors.New("account pending approval")
+	ErrAccountDisabled    = errors.New("account has been disabled")
+	ErrRegistrationClosed = errors.New("registration is disabled")
+	ErrInvalidUsername    = errors.New("username must be 3-50 alphanumeric characters")
+	ErrUsernameExists     = errors.New("username already exists")
 )
 
 type AuthService struct {
@@ -22,6 +27,49 @@ type AuthService struct {
 
 func NewAuthService(userRepo *repository.UserRepository) *AuthService {
 	return &AuthService{userRepo: userRepo}
+}
+
+func (s *AuthService) Register(ctx context.Context, username, password string) error {
+	cfg := config.Get()
+	if !cfg.Auth.Registration {
+		return ErrRegistrationClosed
+	}
+
+	// Validate username: 3-50 chars, alphanumeric + underscore
+	if len(username) < 3 || len(username) > 50 {
+		return ErrInvalidUsername
+	}
+	for _, c := range username {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return ErrInvalidUsername
+		}
+	}
+
+	// Check uniqueness
+	_, err := s.userRepo.FindByUsername(ctx, username)
+	if err == nil {
+		return ErrUsernameExists
+	}
+
+	hash, err := crypto.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	status := model.UserStatusApproved
+	if cfg.Auth.ApprovalRequired {
+		status = model.UserStatusPending
+	}
+
+	user := &model.User{
+		Username:        username,
+		PasswordHash:    hash,
+		Role:            "user",
+		Status:          status,
+		PasswordChanged: true,
+	}
+
+	return s.userRepo.Create(ctx, user)
 }
 
 type LoginResponse struct {
@@ -39,9 +87,21 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 		return nil, ErrInvalidCredentials
 	}
 
-	// Check if using default password
+	// Status check
+	if user.Status == model.UserStatusPending {
+		return nil, ErrAccountPending
+	}
+	if user.Status == model.UserStatusDisabled {
+		return nil, ErrAccountDisabled
+	}
+
+	// Check if password needs to be changed
+	requireChange := !user.PasswordChanged
+	// Also check default admin password
 	cfg := config.Get()
-	requireChange := password == cfg.Admin.Password
+	if password == cfg.Admin.Password {
+		requireChange = true
+	}
 
 	token, err := crypto.GenerateToken(user.ID, user.Username, user.Role)
 	if err != nil {
@@ -49,7 +109,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 	}
 
 	return &LoginResponse{
-		Token:               token,
+		Token:                token,
 		RequirePasswordChange: requireChange,
 	}, nil
 }
