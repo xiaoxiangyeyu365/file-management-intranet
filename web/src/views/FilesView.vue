@@ -58,7 +58,7 @@
           <template v-else>
             <FileGrid
               v-if="filesStore.viewMode === 'grid'"
-              :files="filesStore.files"
+              :files="filesStore.sortedFiles"
               @open="handleOpenFolder"
               @preview="handlePreviewFile"
               @download="handleDownloadFile"
@@ -68,7 +68,7 @@
             />
             <FileList
               v-else
-              :files="filesStore.files"
+              :files="filesStore.sortedFiles"
               @open="handleOpenFolder"
               @preview="handlePreviewFile"
               @download="handleDownloadFile"
