@@ -500,6 +500,45 @@ func (s *FileService) StreamFolderZip(ctx context.Context, userID, folderID int6
 	return s.addFolderToZip(ctx, zipWriter, folder, folder.Name)
 }
 
+func (s *FileService) StreamBatchZip(ctx context.Context, userID int64, fileIDs []int64, writer io.Writer) error {
+	zipWriter := zip.NewWriter(writer)
+	defer zipWriter.Close()
+
+	for _, id := range fileIDs {
+		file, err := s.fileRepo.FindByIDAndOwner(ctx, id, userID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return fmt.Errorf("failed to find file %d: %w", id, err)
+		}
+
+		if file.DeletedAt.Valid {
+			continue
+		}
+
+		if file.IsFolder {
+			if err := s.addFolderToZip(ctx, zipWriter, file, file.Name); err != nil {
+				log.Printf("warning: failed to add folder %s to batch zip: %v", file.Name, err)
+				continue
+			}
+		} else if file.ContentRef != 0 {
+			pf, err := s.physicalRepo.FindByID(ctx, file.ContentRef)
+			if err != nil {
+				log.Printf("warning: failed to find physical file %d: %v", file.ContentRef, err)
+				continue
+			}
+			absPath := s.storage.ToAbsPath(pf.StoragePath)
+			if err := s.addFileToZip(zipWriter, absPath, file.Name); err != nil {
+				log.Printf("warning: failed to add file %s to batch zip: %v", file.Name, err)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *FileService) addFolderToZip(ctx context.Context, zipWriter *zip.Writer, folder *model.File, basePath string) error {
 	files, err := s.fileRepo.FindByParentAndOwner(ctx, folder.ID, folder.OwnerID, false)
 	if err != nil {
