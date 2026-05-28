@@ -56,8 +56,8 @@
           </template>
 
           <template v-else>
-            <FileGrid
-              v-if="filesStore.viewMode === 'grid'"
+            <MobileFileList
+              v-if="isMobile"
               :files="filesStore.sortedFiles"
               @open="handleOpenFolder"
               @preview="handlePreviewFile"
@@ -66,16 +66,28 @@
               @move="handleMove"
               @delete="handleDelete"
             />
-            <FileList
-              v-else
-              :files="filesStore.sortedFiles"
-              @open="handleOpenFolder"
-              @preview="handlePreviewFile"
-              @download="handleDownloadFile"
-              @rename="handleRename"
-              @move="handleMove"
-              @delete="handleDelete"
-            />
+            <template v-else>
+              <FileGrid
+                v-if="filesStore.viewMode === 'grid'"
+                :files="filesStore.sortedFiles"
+                @open="handleOpenFolder"
+                @preview="handlePreviewFile"
+                @download="handleDownloadFile"
+                @rename="handleRename"
+                @move="handleMove"
+                @delete="handleDelete"
+              />
+              <FileList
+                v-else
+                :files="filesStore.sortedFiles"
+                @open="handleOpenFolder"
+                @preview="handlePreviewFile"
+                @download="handleDownloadFile"
+                @rename="handleRename"
+                @move="handleMove"
+                @delete="handleDelete"
+              />
+            </template>
           </template>
         </div>
       </main>
@@ -127,6 +139,7 @@
       @batch-move="handleBatchMove"
       @batch-download="handleBatchDownload"
     />
+    <MobileTabBar />
   </div>
 </template>
 
@@ -148,11 +161,15 @@ import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
 import BatchActionBar from '@/components/Files/BatchActionBar.vue'
+import MobileTabBar from '@/components/Layout/MobileTabBar.vue'
+import MobileFileList from '@/components/Files/MobileFileList.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Loading } from '@element-plus/icons-vue'
 
 const filesStore = useFilesStore()
 const uploadStore = useUploadStore()
+const { isMobile } = useResponsive()
 
 // Dialog states
 const showCreateFolder = ref(false)
@@ -429,6 +446,21 @@ function clearSearch() {
       font-size: 48px;
       margin-bottom: 16px;
     }
+  }
+}
+
+@media (max-width: 767px) {
+  .files-main {
+    padding: 0 12px 12px;
+
+    &.with-panel {
+      margin-right: 0;
+    }
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 4px;
   }
 }
 </style>
