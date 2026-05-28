@@ -184,6 +184,53 @@ export const useFilesStore = defineStore('files', {
       }
     },
 
+    async batchDownload() {
+      const token = localStorage.getItem('cloudbox_token')
+      if (!token) {
+        console.error('No token found, please login first')
+        return
+      }
+
+      const ids = this.selectedIds.join(',')
+      const url = `/api/files/download?ids=${ids}`
+      try {
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json()
+          if (data.code !== 0) {
+            console.error('Batch download failed:', data.message)
+            return
+          }
+        }
+
+        if (response.ok) {
+          const blob = await response.blob()
+          const disposition = response.headers.get('Content-Disposition')
+          let filename = 'downloads.zip'
+          if (disposition) {
+            const parts = disposition.split("'")
+            if (parts.length >= 3) {
+              filename = decodeURIComponent(parts[2])
+            } else {
+              const match = disposition.match(/filename="?([^;"']+)/)
+              if (match) filename = match[1]
+            }
+          }
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = filename
+          a.click()
+          URL.revokeObjectURL(a.href)
+        }
+      } catch (err) {
+        console.error('Batch download error:', err)
+      }
+    },
+
     toggleViewMode() {
       this.viewMode = this.viewMode === 'grid' ? 'list' : 'grid'
       localStorage.setItem('cloudbox_viewMode', this.viewMode)
