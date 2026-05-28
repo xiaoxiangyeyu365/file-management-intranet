@@ -165,4 +165,18 @@ function handleCommand(command) {
     }
   }
 }
+
+@media (max-width: 767px) {
+  .app-header {
+    padding: 0 12px;
+
+    .header-left .logo .logo-text {
+      font-size: 16px;
+    }
+
+    .header-right .user-dropdown span:not(.el-icon) {
+      display: none;
+    }
+  }
+}
 </style>
