@@ -137,4 +137,16 @@ function handleSortChange(command) {
   display: flex;
   gap: 8px;
 }
+
+@media (max-width: 767px) {
+  .toolbar-left {
+    .el-button span:not(.el-icon) {
+      display: none;
+    }
+  }
+
+  .toolbar-right {
+    display: none;
+  }
+}
 </style>
