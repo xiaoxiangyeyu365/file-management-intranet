@@ -13,12 +13,32 @@ export const useFilesStore = defineStore('files', {
     searchSort: 'relevance',
     searchResults: [],
     isSearching: false,
-    path: [{ id: 0, name: '根目录' }]
+    path: [{ id: 0, name: '根目录' }],
+    sortBy: 'name',
+    sortOrder: 'asc'
   }),
 
   getters: {
     folders: (state) => state.files.filter(f => f.isFolder),
-    filesOnly: (state) => state.files.filter(f => !f.isFolder)
+    filesOnly: (state) => state.files.filter(f => !f.isFolder),
+    sortedFiles: (state) => {
+      const folders = state.files.filter(f => f.isFolder)
+      const filesOnly = state.files.filter(f => !f.isFolder)
+
+      const sortFn = (a, b) => {
+        let cmp = 0
+        if (state.sortBy === 'name') {
+          cmp = a.name.localeCompare(b.name)
+        } else if (state.sortBy === 'size') {
+          cmp = (a.physical?.size ?? 0) - (b.physical?.size ?? 0)
+        } else if (state.sortBy === 'updatedAt') {
+          cmp = (a.updatedAt || '').localeCompare(b.updatedAt || '')
+        }
+        return state.sortOrder === 'asc' ? cmp : -cmp
+      }
+
+      return [...folders.sort(sortFn), ...filesOnly.sort(sortFn)]
+    }
   },
 
   actions: {
@@ -37,6 +57,8 @@ export const useFilesStore = defineStore('files', {
         this.searchKeyword = ''
         this.searchResults = []
         this.isSearching = false
+        this.sortBy = 'name'
+        this.sortOrder = 'asc'
       } catch (err) {
         console.error('fetchFiles error:', err)
       } finally {
@@ -169,6 +191,11 @@ export const useFilesStore = defineStore('files', {
 
     setSelected(ids) {
       this.selectedIds = ids
+    },
+
+    setSort(sortBy, sortOrder) {
+      this.sortBy = sortBy
+      this.sortOrder = sortOrder
     },
 
     updatePath(path) {
