@@ -6,7 +6,7 @@
       class="file-card"
       :class="{ selected: isSelected(file.id) }"
       @click="handleClick(file)"
-      @touchstart.prevent="onTouchStart(file, $event)"
+      @touchstart="onTouchStart(file, $event)"
       @touchend="onTouchEnd"
       @touchmove="onTouchMove"
       @contextmenu.prevent="showContextMenu($event, file)"
@@ -114,6 +114,10 @@ function toggleSelect(id) {
 
 // Click handling
 function handleClick(file) {
+  if (longPressTriggered) {
+    longPressTriggered = false
+    return
+  }
   if (isMultiSelectMode.value) {
     toggleSelect(file.id)
     return
