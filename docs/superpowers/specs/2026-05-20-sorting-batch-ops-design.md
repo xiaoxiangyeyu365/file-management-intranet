@@ -2,7 +2,7 @@
 
 **Goal:** Fix broken frontend sorting and add batch delete/download operations with a floating action bar.
 
-**Approach:** Pure frontend sorting (no backend changes). Batch operations reuse existing single-file APIs with error handling. Floating toolbar at bottom when files are selected.
+**Approach:** Pure frontend sorting (no backend changes for sorting). Batch download requires a new backend ZIP endpoint. Batch delete/move reuse existing APIs with error handling. Floating toolbar at bottom when files are selected.
 
 ---
 
@@ -61,12 +61,12 @@
 
 ### Batch Delete
 
-- Click 删除 → `ElMessageBox.confirm('确定删除选中的 N 个文件？')`
+- Click 删除 → `ElMessageBox.confirm('确定删除选中的 N 个文件？此操作不可恢复')`
 - On confirm: `Promise.allSettled(selectedIds.map(id => fileAPI.delete(id)))`
 - Count fulfilled vs rejected
 - All success: `ElMessage.success('已删除 N 个文件')`
-- Partial failure: `ElMessage.warning('成功删除 N 个文件，M 个失败')`
-- Always refresh file list once via `fetchFiles(currentFolder)` afterward
+- Partial failure: `ElMessage.warning('成功删除 N 个文件，M 个失败')` + console.error log of failed filenames
+- Always refresh file list once via `fetchFiles(currentFolder)` to clear any residual deleted items
 - Clear `selectedIds` regardless of outcome
 
 ### Batch Move
@@ -77,10 +77,20 @@
 
 ### Batch Download
 
-- Sequential `window.open(downloadUrl, '_blank')` for each selected file
-- 300ms interval between downloads to prevent browser popup blocker
-- Skip folders or use `downloadFolder()` for folder items
-- No backend change — reuses existing single-file and folder download endpoints
+- Download selected files as a single ZIP archive via a new backend endpoint
+- `GET /api/files/download?ids=1,2,3` — authenticated via JWT header or `?token=` query param
+- Backend streams a ZIP file on-the-fly (no temp file), sets `Content-Disposition: attachment; filename*=UTF-8''downloads.zip`
+- Folders within the selection are recursively included in the ZIP
+- Reuse existing `archive/zip` dependency and folder-walking logic from `DownloadFolder`
+- Frontend: single `fetch()` call, save blob like `downloadFolder()` does
+- No popup blocker issues since it's one download triggered from a user gesture
+
+**Backend endpoint (`internal/handler/file.go`):**
+
+- New handler `BatchDownload` — accepts `ids` query param (comma-separated file IDs)
+- Validate all IDs belong to the current user
+- Stream ZIP response with each file/folder as an entry
+- Route: `protected.GET("/files/download", fileHandler.BatchDownload)` — must be before `/:id` routes
 
 ---
 
@@ -88,11 +98,14 @@
 
 | File | Change |
 |------|--------|
-| `web/src/stores/files.js` | Add `sortBy`, `sortOrder` state, `sortedFiles` getter, `setSort()` action |
+| `web/src/stores/files.js` | Add `sortBy`, `sortOrder` state, `sortedFiles` getter, `setSort()` action, `batchDownload()` |
 | `web/src/components/FileList.vue` | Fix `sort-method` on size/time columns, sync to store |
 | `web/src/components/FileGrid.vue` | Use `sortedFiles` instead of `files` |
 | `web/src/components/Toolbar.vue` | Add sort dropdown for grid view |
 | `web/src/components/BatchActionBar.vue` | New component — floating batch action bar |
 | `web/src/views/FilesView.vue` | Include `BatchActionBar`, wire batch operations |
+| `internal/handler/file.go` | Add `BatchDownload` handler |
+| `internal/service/file.go` | Add `BatchDownload` service method (stream ZIP) |
+| `cmd/server/main.go` | Register `GET /files/download` route |
 
-No backend changes required.
+Backend change only for batch download ZIP endpoint. Sorting and batch delete/move are frontend-only.
