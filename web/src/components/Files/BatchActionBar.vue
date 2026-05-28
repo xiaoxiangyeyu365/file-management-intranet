@@ -75,4 +75,19 @@ const emit = defineEmits(['batch-delete', 'batch-move', 'batch-download'])
   transform: translateY(100%);
   opacity: 0;
 }
+
+@media (max-width: 767px) {
+  .batch-action-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+
+    .batch-cancel {
+      flex-basis: 100%;
+      text-align: center;
+      margin-left: 0;
+      margin-top: 4px;
+    }
+  }
+}
 </style>
