@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -382,5 +383,42 @@ func (h *FileHandler) DownloadFolder(c *gin.Context) {
 	if err := h.fileService.StreamFolderZip(c.Request.Context(), userID, folderID, c.Writer); err != nil {
 		// Headers already sent, can only log error
 		log.Printf("error streaming folder zip: %v", err)
+	}
+}
+
+func (h *FileHandler) BatchDownload(c *gin.Context) {
+	userID := GetUserID(c)
+
+	idsStr := c.Query("ids")
+	if idsStr == "" {
+		response.Error(c, 400, "ids parameter is required")
+		return
+	}
+
+	parts := strings.Split(idsStr, ",")
+	var fileIDs []int64
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			response.Error(c, 400, "invalid file id: "+p)
+			return
+		}
+		fileIDs = append(fileIDs, id)
+	}
+
+	if len(fileIDs) == 0 {
+		response.Error(c, 400, "no valid file ids provided")
+		return
+	}
+
+	c.Header("Content-Disposition", "attachment; filename*=UTF-8''downloads.zip")
+	c.Header("Content-Type", "application/zip")
+
+	if err := h.fileService.StreamBatchZip(c.Request.Context(), userID, fileIDs, c.Writer); err != nil {
+		log.Printf("error streaming batch zip: %v", err)
 	}
 }

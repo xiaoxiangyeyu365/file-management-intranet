@@ -100,7 +100,8 @@ func main() {
 
 		// Files
 		protected.GET("/files", fileHandler.ListFiles)
-		protected.GET("/files/search", fileHandler.SearchFiles)  // Must be before /files/:id
+		protected.GET("/files/search", fileHandler.SearchFiles)       // Must be before /files/:id
+		protected.GET("/files/download", fileHandler.BatchDownload)    // Must be before /:id routes
 		protected.GET("/files/lookup", fileHandler.LookupFile)
 		protected.GET("/files/:id", fileHandler.GetFile)
 		protected.GET("/files/:id/download", fileHandler.DownloadFile)
