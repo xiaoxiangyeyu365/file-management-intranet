@@ -79,16 +79,25 @@
 
 - Download selected files as a single ZIP archive via a new backend endpoint
 - `GET /api/files/download?ids=1,2,3` — authenticated via JWT header or `?token=` query param
+- GET is sufficient; typical batch selection is dozens of files, well within URL length limits. POST can be added later if needed.
 - Backend streams a ZIP file on-the-fly (no temp file), sets `Content-Disposition: attachment; filename*=UTF-8''downloads.zip`
-- Folders within the selection are recursively included in the ZIP
-- Reuse existing `archive/zip` dependency and folder-walking logic from `DownloadFolder`
-- Frontend: single `fetch()` call, save blob like `downloadFolder()` does
+- Frontend: single `fetch()` call with Authorization header, save blob like `downloadFolder()` does
 - No popup blocker issues since it's one download triggered from a user gesture
+
+**ZIP internal path structure:**
+
+- Files are placed at their logical path in the user's cloud drive, relative to root
+- Example: file at `/项目/report.pdf` → ZIP entry `项目/report.pdf`; file at `/照片/2024/img.jpg` → ZIP entry `照片/2024/img.jpg`
+- This preserves folder hierarchy and avoids name collisions (same-name files in different folders are safe)
+- If a single folder is selected, its internal structure is preserved as-is
+- Implementation: for each selected top-level item, resolve its full path by walking parent_id chain upward, then recursively write entries with that path prefix
+- Reuse existing folder-walking logic from `DownloadFolder` — same recursion, just with a path prefix
 
 **Backend endpoint (`internal/handler/file.go`):**
 
 - New handler `BatchDownload` — accepts `ids` query param (comma-separated file IDs)
-- Validate all IDs belong to the current user
+- Validate all IDs: `owner_id` must match current user AND `deleted_at IS NULL`
+- For folder items: recursively traverse children, same user/deleted checks applied
 - Stream ZIP response with each file/folder as an entry
 - Route: `protected.GET("/files/download", fileHandler.BatchDownload)` — must be before `/:id` routes
 
