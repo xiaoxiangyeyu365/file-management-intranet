@@ -12,6 +12,13 @@
   --upload-panel-width: 320px;
 }
 
+// Mobile breakpoint mixin
+@mixin mobile {
+  @media (max-width: 767px) {
+    @content;
+  }
+}
+
 // Reset and base styles
 * {
   margin: 0;
