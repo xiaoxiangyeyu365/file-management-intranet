@@ -93,4 +93,10 @@ const authStore = useAuthStore()
     font-size: 14px;
   }
 }
+
+@media (max-width: 767px) {
+  .app-sidebar {
+    display: none;
+  }
+}
 </style>
