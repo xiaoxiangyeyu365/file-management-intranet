@@ -121,6 +121,12 @@
         <div>拖放文件到此处上传</div>
       </div>
     </div>
+
+    <BatchActionBar
+      @batch-delete="handleBatchDelete"
+      @batch-move="handleBatchMove"
+      @batch-download="handleBatchDownload"
+    />
   </div>
 </template>
 
@@ -141,7 +147,8 @@ import CreateFolderDialog from '@/components/Dialogs/CreateFolderDialog.vue'
 import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
-import { ElMessage } from 'element-plus'
+import BatchActionBar from '@/components/Files/BatchActionBar.vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Loading } from '@element-plus/icons-vue'
 
 const filesStore = useFilesStore()
@@ -285,6 +292,48 @@ async function handleConfirmDelete() {
   } catch (err) {
     ElMessage.error(err.response?.data?.message || '删除失败')
   }
+}
+
+async function handleBatchDelete() {
+  const count = filesStore.selectedIds.length
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${count} 个文件？此操作不可恢复`,
+      '批量删除',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  const results = await Promise.allSettled(
+    filesStore.selectedIds.map(id => filesStore.deleteFile(id))
+  )
+  const succeeded = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.filter(r => r.status === 'rejected').length
+
+  if (failed === 0) {
+    ElMessage.success(`已删除 ${succeeded} 个文件`)
+  } else {
+    const failedIds = results
+      .map((r, i) => r.status === 'rejected' ? filesStore.selectedIds[i] : null)
+      .filter(Boolean)
+    console.error('批量删除失败，文件ID:', failedIds)
+    ElMessage.warning(`成功删除 ${succeeded} 个文件，${failed} 个失败`)
+  }
+
+  await filesStore.fetchFiles(filesStore.currentFolder)
+  filesStore.setSelected([])
+}
+
+function handleBatchMove() {
+  const selected = filesStore.sortedFiles.filter(f => filesStore.selectedIds.includes(f.id))
+  selectedFiles.value = selected
+  showMove.value = true
+}
+
+function handleBatchDownload() {
+  filesStore.batchDownload()
 }
 
 function clearSearch() {
