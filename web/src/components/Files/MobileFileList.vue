@@ -170,7 +170,12 @@ const contextMenuPos = ref({ x: 0, y: 0 })
 
 function showContextMenu(event, file) {
   contextMenuFile.value = file
-  contextMenuPos.value = { x: event.clientX, y: event.clientY }
+  // Clamp position to viewport to prevent overflow on narrow screens
+  const menuWidth = 150
+  const menuHeight = 180
+  const x = Math.min(event.clientX, window.innerWidth - menuWidth)
+  const y = Math.min(event.clientY, window.innerHeight - menuHeight)
+  contextMenuPos.value = { x: Math.max(0, x), y: Math.max(0, y) }
   contextMenuVisible.value = true
 }
 

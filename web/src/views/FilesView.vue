@@ -139,7 +139,6 @@
       @batch-move="handleBatchMove"
       @batch-download="handleBatchDownload"
     />
-    <MobileTabBar />
   </div>
 </template>
 
@@ -161,7 +160,6 @@ import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
 import BatchActionBar from '@/components/Files/BatchActionBar.vue'
-import MobileTabBar from '@/components/Layout/MobileTabBar.vue'
 import MobileFileList from '@/components/Files/MobileFileList.vue'
 import { useResponsive } from '@/composables/useResponsive'
 import { ElMessage, ElMessageBox } from 'element-plus'
