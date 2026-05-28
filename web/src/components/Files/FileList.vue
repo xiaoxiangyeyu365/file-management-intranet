@@ -4,6 +4,7 @@
       :data="files"
       @row-dblclick="handleDoubleClick"
       @selection-change="handleSelectionChange"
+      @sort-change="handleSortChange"
       row-key="id"
       style="width: 100%"
     >
@@ -18,14 +19,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="大小" width="120" sortable>
+      <el-table-column label="大小" width="120" :sort-method="sortBySize" :sortable="'custom'">
         <template #default="{ row }">
           <span v-if="row.isFolder">-</span>
           <span v-else>{{ formatSize(row.physical?.size || 0) }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="修改时间" width="180" sortable>
+      <el-table-column label="修改时间" width="180" :sort-method="sortByTime" :sortable="'custom'">
         <template #default="{ row }">
           <span v-if="row.updatedAt && row.updatedAt !== '0001-01-01T00:00:00Z'">{{ formatDate(row.updatedAt) }}</span>
           <span v-else>-</span>
@@ -169,6 +170,23 @@ function handleDoubleClick(row) {
 
 function handleSelectionChange(selection) {
   filesStore.setSelected(selection.map(f => f.id))
+}
+
+function sortBySize(a, b) {
+  return (a.physical?.size ?? 0) - (b.physical?.size ?? 0)
+}
+
+function sortByTime(a, b) {
+  return (a.updatedAt || '').localeCompare(b.updatedAt || '')
+}
+
+function handleSortChange({ prop, order }) {
+  if (!order) {
+    filesStore.setSort('name', 'asc')
+  } else {
+    const sortBy = prop === '大小' || prop === 'size' ? 'size' : prop === '修改时间' || prop === 'updatedAt' ? 'updatedAt' : 'name'
+    filesStore.setSort(sortBy, order === 'ascending' ? 'asc' : 'desc')
+  }
 }
 </script>
 
