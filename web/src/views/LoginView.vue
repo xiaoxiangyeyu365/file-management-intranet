@@ -122,6 +122,7 @@ async function handleLogin() {
 
 .login-box {
   width: 360px;
+  max-width: calc(100% - 32px);
   padding: 40px;
   background: white;
   border-radius: 12px;
