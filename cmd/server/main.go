@@ -28,19 +28,23 @@ func main() {
 
 	// Initialize storage
 	storageManager := storage.InitStorage(cfg)
+	storage.StartTempCleanup(cfg.Upload.TempExpire)
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 	fileRepo := repository.NewFileRepository(db)
 	physicalRepo := repository.NewPhysicalFileRepository(db)
 	clipboardRepo := repository.NewClipboardRepository(db)
+	shareRepo := repository.NewShareRepository(db)
 
 	// Initialize services
-	authService := service.NewAuthService(userRepo)
+	cryptoAdapter := service.NewCryptoAdapter()
+	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager)
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager, previewService)
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager, previewService, cfg.Upload.ChunkSize)
 	clipboardService := service.NewClipboardService(clipboardRepo)
+	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
@@ -51,8 +55,9 @@ func main() {
 	clipboardHandler := handler.NewClipboardHandler(clipboardService)
 
 	// Initialize admin service and handler
-	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService)
+	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter)
 	adminHandler := handler.NewAdminHandler(adminService)
+	shareHandler := handler.NewShareHandler(shareService, fileService)
 
 	// Setup Gin
 	r := gin.Default()
@@ -80,6 +85,14 @@ func main() {
 
 	// API routes
 	api := r.Group("/api")
+
+	// Public share routes (no JWT required)
+	sGroup := r.Group("/api/s")
+	{
+		sGroup.GET("/:token", shareHandler.GetShareInfo)
+		sGroup.POST("/:token/verify", shareHandler.VerifyShare)
+		sGroup.GET("/:token/download", shareHandler.DownloadByShare)
+	}
 
 	// Rate limiting for auth routes (100 requests per minute per IP)
 	auth := api.Group("/auth")
@@ -134,7 +147,13 @@ func main() {
 		protected.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
 		protected.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
 		protected.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
-	}
+
+		// Shares
+		protected.POST("/shares", shareHandler.CreateShare)
+		protected.GET("/shares", shareHandler.ListFileShares)
+		protected.GET("/shares/mine", shareHandler.ListMyShares)
+		protected.DELETE("/shares/:id", shareHandler.RevokeShare)
+		}
 
 	// Admin routes
 	admin := api.Group("/admin")
