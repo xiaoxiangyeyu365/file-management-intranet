@@ -19,6 +19,15 @@
     </router-link>
 
     <router-link
+      to="/shares"
+      class="tab-item"
+      :class="{ active: route.path === '/shares' }"
+    >
+      <el-icon><Share /></el-icon>
+      <span>分享</span>
+    </router-link>
+
+    <router-link
       to="/trash"
       class="tab-item"
       :class="{ active: route.path === '/trash' }"
@@ -44,7 +53,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useFilesStore } from '@/stores/files'
-import { Folder, Document, Delete, Setting } from '@element-plus/icons-vue'
+import { Folder, Document, Delete, Setting, Share } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()

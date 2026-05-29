@@ -61,6 +61,10 @@
           <el-icon><Download /></el-icon>
           <span>下载</span>
         </div>
+        <div class="context-menu-item" @click="handleShare">
+          <el-icon><Share /></el-icon>
+          <span>分享</span>
+        </div>
         <div class="context-menu-item" @click="handleMove">
           <el-icon><Right /></el-icon>
           <span>移动</span>
@@ -78,7 +82,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
-import { MoreFilled, Edit, Download, Right, Delete, CircleCheck, CircleCheckFilled } from '@element-plus/icons-vue'
+import { MoreFilled, Edit, Download, Right, Delete, CircleCheck, CircleCheckFilled, Share } from '@element-plus/icons-vue'
 
 const props = defineProps({
   files: {
@@ -87,7 +91,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete'])
+const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share'])
 
 const filesStore = useFilesStore()
 
@@ -209,6 +213,11 @@ function handleMove() {
 
 function handleDelete() {
   if (contextMenuFile.value) emit('delete', contextMenuFile.value)
+  hideContextMenu()
+}
+
+function handleShare() {
+  if (contextMenuFile.value) emit('share', contextMenuFile.value)
   hideContextMenu()
 }
 

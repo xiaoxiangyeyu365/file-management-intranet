@@ -29,6 +29,15 @@
       </router-link>
 
       <router-link
+        to="/shares"
+        class="nav-item"
+        :class="{ active: route.path === '/shares' }"
+      >
+        <el-icon><Share /></el-icon>
+        <span>我的分享</span>
+      </router-link>
+
+      <router-link
         v-if="authStore.isAdmin"
         to="/admin/users"
         class="nav-item"
@@ -44,7 +53,7 @@
 <script setup>
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Folder, Delete, Document, User } from '@element-plus/icons-vue'
+import { Folder, Delete, Document, User, Share } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()

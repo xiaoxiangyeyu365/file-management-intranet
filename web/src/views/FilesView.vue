@@ -41,6 +41,7 @@
                 @rename="handleRename"
                 @move="handleMove"
                 @delete="handleDelete"
+                @share="handleShareFile"
               />
               <FileList
                 v-else
@@ -51,6 +52,7 @@
                 @rename="handleRename"
                 @move="handleMove"
                 @delete="handleDelete"
+                @share="handleShareFile"
               />
             </div>
           </template>
@@ -65,6 +67,7 @@
               @rename="handleRename"
               @move="handleMove"
               @delete="handleDelete"
+              @share="handleShareFile"
             />
             <template v-else>
               <FileGrid
@@ -76,6 +79,7 @@
                 @rename="handleRename"
                 @move="handleMove"
                 @delete="handleDelete"
+                @share="handleShareFile"
               />
               <FileList
                 v-else
@@ -86,6 +90,7 @@
                 @rename="handleRename"
                 @move="handleMove"
                 @delete="handleDelete"
+                @share="handleShareFile"
               />
             </template>
           </template>
@@ -126,6 +131,11 @@
       :file="previewFile"
     />
 
+    <CreateShareDialog
+      v-model:visible="showShareDialog"
+      :file="shareFile"
+    />
+
     <!-- Drag overlay -->
     <div v-if="isDragging" class="drag-overlay">
       <div class="drag-content">
@@ -159,6 +169,7 @@ import CreateFolderDialog from '@/components/Dialogs/CreateFolderDialog.vue'
 import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
+import CreateShareDialog from '@/components/Dialogs/CreateShareDialog.vue'
 import BatchActionBar from '@/components/Files/BatchActionBar.vue'
 import MobileFileList from '@/components/Files/MobileFileList.vue'
 import { useResponsive } from '@/composables/useResponsive'
@@ -175,6 +186,8 @@ const showRename = ref(false)
 const showMove = ref(false)
 const showDeleteConfirm = ref(false)
 const showImagePreview = ref(false)
+const showShareDialog = ref(false)
+const shareFile = ref(null)
 
 // Selection states
 const selectedFile = ref(null)
@@ -250,6 +263,11 @@ function handleDownloadFile(file) {
   } else {
     filesStore.downloadFile(file.id)
   }
+}
+
+function handleShareFile(file) {
+  shareFile.value = file
+  showShareDialog.value = true
 }
 
 // Preview
