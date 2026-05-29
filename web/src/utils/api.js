@@ -127,4 +127,18 @@ export const adminAPI = {
   deleteUser: (id) => api.delete(`/admin/users/${id}`)
 }
 
+// Share API
+export const shareAPI = {
+  // Public (no auth header needed)
+  getInfo: (token) => api.get(`/s/${token}`),
+  verify: (token, password = '') => api.post(`/s/${token}/verify`, { password }),
+  downloadUrl: (token, credential) => `${import.meta.env.VITE_API_BASE_URL || '/api'}/s/${token}/download?t=${encodeURIComponent(credential)}`,
+
+  // Authenticated
+  create: (data) => api.post('/shares', data),
+  listFile: (fileId) => api.get('/shares', { params: { fileId } }),
+  listMine: () => api.get('/shares/mine'),
+  revoke: (id) => api.delete(`/shares/${id}`),
+}
+
 export default api
