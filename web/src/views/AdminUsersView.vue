@@ -1,13 +1,19 @@
 <template>
   <div class="admin-users-view">
-    <div class="page-header">
-      <h2>用户管理</h2>
-      <el-button type="primary" @click="showCreateDialog = true">
-        创建用户
-      </el-button>
-    </div>
+    <AppHeader />
 
-    <div class="filter-tabs">
+    <div class="files-layout">
+      <AppSidebar />
+
+      <main class="files-main">
+        <div class="page-header">
+          <h2>用户管理</h2>
+          <el-button type="primary" @click="showCreateDialog = true">
+            创建用户
+          </el-button>
+        </div>
+
+        <div class="filter-tabs">
       <el-radio-group v-model="statusFilter" @change="fetchUsers">
         <el-radio-button label="">全部</el-radio-button>
         <el-radio-button label="pending">
@@ -125,6 +131,8 @@
         <el-button type="primary" :loading="resetLoading" @click="handleResetPassword">确认</el-button>
       </template>
     </el-dialog>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -133,6 +141,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAdminStore } from '@/stores/admin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AppHeader from '@/components/Layout/AppHeader.vue'
+import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
 const adminStore = useAdminStore()
 const authStore = useAuthStore()
@@ -287,9 +297,21 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .admin-users-view {
-  padding: 24px;
-  height: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.files-main {
+  flex: 1;
   overflow-y: auto;
+  padding: 24px;
 }
 
 .page-header {

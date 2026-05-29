@@ -1,10 +1,16 @@
 <template>
   <div class="shares-view">
-    <div class="page-header">
-      <h2>我的分享</h2>
-    </div>
+    <AppHeader />
 
-    <el-table :data="sharesStore.myShares" v-loading="sharesStore.loading" stripe style="width: 100%">
+    <div class="files-layout">
+      <AppSidebar />
+
+      <main class="files-main">
+        <div class="page-header">
+          <h2>我的分享</h2>
+        </div>
+
+        <el-table :data="sharesStore.myShares" v-loading="sharesStore.loading" stripe style="width: 100%">
       <el-table-column label="文件" min-width="160">
         <template #default="{ row }">
           <el-icon style="vertical-align: middle; margin-right: 4px">
@@ -51,6 +57,8 @@
         <el-empty description="暂无分享记录" :image-size="80" />
       </template>
     </el-table>
+      </main>
+    </div>
   </div>
 </template>
 
@@ -59,6 +67,8 @@ import { onMounted } from 'vue'
 import { Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSharesStore } from '../stores/shares'
+import AppHeader from '../components/Layout/AppHeader.vue'
+import AppSidebar from '../components/Layout/AppSidebar.vue'
 
 const sharesStore = useSharesStore()
 
@@ -111,6 +121,20 @@ async function handleRevoke(share) {
 
 <style scoped>
 .shares-view {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.files-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.files-main {
+  flex: 1;
+  overflow-y: auto;
   padding: 20px;
 }
 
