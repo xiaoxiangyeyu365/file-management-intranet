@@ -66,6 +66,11 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to create clipboard table: %v", err)
 	}
 
+	// Create file_shares table
+	if err := createFileSharesTable(); err != nil {
+		log.Fatalf("failed to create file_shares table: %v", err)
+	}
+
 	// Create default admin
 	createDefaultAdmin(cfg)
 
@@ -171,6 +176,60 @@ func createClipboardTable() error {
 	// Create index for MySQL
 	if DB.Dialector.Name() == "mysql" {
 		DB.Exec("CREATE INDEX idx_clipboard_user_pinned_created ON clipboard_records(user_id, pinned, created_at)")
+	}
+
+	return nil
+}
+
+func createFileSharesTable() error {
+	// Check if table exists
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_shares'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'cloudbox' AND table_name = 'file_shares'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE file_shares (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			token VARCHAR(8) NOT NULL UNIQUE,
+			file_id INTEGER NOT NULL,
+			owner_id INTEGER NOT NULL,
+			password_hash VARCHAR(255),
+			expires_at DATETIME,
+			max_downloads INTEGER DEFAULT 0,
+			download_count INTEGER DEFAULT 0,
+			revoked BOOLEAN DEFAULT 0,
+			created_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		// Create indexes separately for SQLite
+		DB.Exec("CREATE INDEX idx_file_shares_file_id ON file_shares(file_id)")
+		DB.Exec("CREATE INDEX idx_file_shares_owner_id ON file_shares(owner_id)")
+	} else {
+		sql := `CREATE TABLE file_shares (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			token VARCHAR(8) NOT NULL UNIQUE,
+			file_id BIGINT NOT NULL,
+			owner_id BIGINT NOT NULL,
+			password_hash VARCHAR(255),
+			expires_at DATETIME,
+			max_downloads INT DEFAULT 0,
+			download_count INT DEFAULT 0,
+			revoked BOOLEAN DEFAULT FALSE,
+			created_at DATETIME NOT NULL,
+			INDEX idx_file_shares_file_id (file_id),
+			INDEX idx_file_shares_owner_id (owner_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
 	}
 
 	return nil
