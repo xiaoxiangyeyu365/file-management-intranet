@@ -4,6 +4,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ type Config struct {
 	Log      LogConfig      `yaml:"log"`
 	Admin    AdminConfig    `yaml:"admin"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Share    ShareConfig    `yaml:"share"`
 }
 
 type ServerConfig struct {
@@ -72,6 +74,12 @@ type AuthConfig struct {
 	ApprovalRequired bool `yaml:"approval_required"`
 }
 
+type ShareConfig struct {
+	Secret        string `yaml:"secret"`
+	TokenLength   int    `yaml:"token_length"`
+	CredentialTTL int    `yaml:"credential_ttl"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -117,6 +125,10 @@ func Load() *Config {
 				Registration:     true,
 				ApprovalRequired: true,
 			},
+			Share: ShareConfig{
+				TokenLength:   8,
+				CredentialTTL: 300,
+			},
 		}
 
 		// Find config file
@@ -146,6 +158,11 @@ func Load() *Config {
 		if cfg.JWT.Secret == "" {
 			log.Println("WARNING: JWT_SECRET not set, using random key (not suitable for production)")
 			cfg.JWT.Secret = generateRandomKey()
+		}
+
+		if cfg.Share.Secret == "" {
+			cfg.Share.Secret = generateRandomSecret()
+			log.Println("warning: share.secret not configured, using random secret (shares will break on restart)")
 		}
 
 		// Get base directory: executable directory or current working directory
@@ -198,6 +215,14 @@ func generateRandomKey() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		log.Fatalf("failed to generate random key: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
+
+func generateRandomSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
 }
