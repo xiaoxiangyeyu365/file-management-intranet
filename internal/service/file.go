@@ -4,8 +4,6 @@ package service
 import (
 	"archive/zip"
 	"cloudbox/internal/model"
-	"cloudbox/internal/repository"
-	"cloudbox/internal/util/storage"
 	"context"
 	"database/sql"
 	"errors"
@@ -38,15 +36,15 @@ const thumbnailSize = 200
 const maxLockAge = 30 * time.Second
 
 type FileService struct {
-	fileRepo     *repository.FileRepository
-	physicalRepo *repository.PhysicalFileRepository
-	storage      *storage.StorageManager
+	fileRepo     FileRepository
+	physicalRepo PhysicalFileRepository
+	storage      Storage
 }
 
 func NewFileService(
-	fileRepo *repository.FileRepository,
-	physicalRepo *repository.PhysicalFileRepository,
-	storage *storage.StorageManager,
+	fileRepo FileRepository,
+	physicalRepo PhysicalFileRepository,
+	storage Storage,
 ) *FileService {
 	return &FileService{
 		fileRepo:     fileRepo,
@@ -324,7 +322,7 @@ func (s *FileService) DownloadFile(ctx context.Context, userID, fileID int64) (*
 	return file, pf, nil
 }
 
-func (s *FileService) GetStorage() *storage.StorageManager {
+func (s *FileService) GetStorage() Storage {
 	return s.storage
 }
 
@@ -490,6 +488,21 @@ func (s *FileService) StreamFolderZip(ctx context.Context, userID, folderID int6
 		return fmt.Errorf("failed to find folder: %w", err)
 	}
 
+	if !folder.IsFolder {
+		return errors.New("not a folder")
+	}
+
+	zipWriter := zip.NewWriter(writer)
+	defer zipWriter.Close()
+
+	return s.addFolderToZip(ctx, zipWriter, folder, folder.Name)
+}
+
+func (s *FileService) StreamFolderZipByID(ctx context.Context, folderID int64, writer io.Writer) error {
+	folder, err := s.fileRepo.FindByID(ctx, folderID)
+	if err != nil {
+		return fmt.Errorf("failed to find folder: %w", err)
+	}
 	if !folder.IsFolder {
 		return errors.New("not a folder")
 	}
