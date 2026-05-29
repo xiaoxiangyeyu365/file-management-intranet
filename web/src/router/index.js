@@ -43,6 +43,18 @@ const routes = [
     name: 'AdminUsers',
     component: AdminUsersView,
     meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/s/:token',
+    name: 'SharePreview',
+    component: () => import('../views/SharePreview.vue'),
+    meta: { public: true }
+  },
+  {
+    path: '/shares',
+    name: 'Shares',
+    component: () => import('../views/SharesView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -52,6 +64,10 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
+  if (to.meta.public) {
+    return next()
+  }
+
   const authStore = useAuthStore()
 
   if (authStore.token && !authStore.user) {
