@@ -109,3 +109,35 @@ func (r *PhysicalFileRepository) UpdateMetadataWithOptimisticLock(ctx context.Co
 	}
 	return result.RowsAffected > 0, nil
 }
+
+func (r *PhysicalFileRepository) CalculateUserStorageUsage(ctx context.Context, userID int64) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Table("files").
+		Select("COALESCE(SUM(physical_files.size), 0)").
+		Joins("JOIN physical_files ON files.physical_id = physical_files.id").
+		Where("files.owner_id = ? AND files.is_folder = 0", userID).
+		Scan(&total).Error
+	return total, err
+}
+
+func (r *PhysicalFileRepository) CalculateAllUserStorageUsage(ctx context.Context) (map[int64]int64, error) {
+	type usageRow struct {
+		OwnerID   int64
+		UsedBytes int64
+	}
+	var rows []usageRow
+	err := r.db.WithContext(ctx).Table("files").
+		Select("files.owner_id, COALESCE(SUM(physical_files.size), 0) AS used_bytes").
+		Joins("JOIN physical_files ON files.physical_id = physical_files.id").
+		Where("files.is_folder = 0").
+		Group("files.owner_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		result[row.OwnerID] = row.UsedBytes
+	}
+	return result, nil
+}

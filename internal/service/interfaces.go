@@ -32,6 +32,8 @@ type PhysicalFileRepository interface {
 	UpdateThumbnail(ctx context.Context, id int64, thumbnailPath string) error
 	Delete(ctx context.Context, id int64) error
 	Update(ctx context.Context, pf *model.PhysicalFile) error
+	CalculateUserStorageUsage(ctx context.Context, userID int64) (int64, error)
+	CalculateAllUserStorageUsage(ctx context.Context) (map[int64]int64, error)
 }
 
 type UserRepository interface {
