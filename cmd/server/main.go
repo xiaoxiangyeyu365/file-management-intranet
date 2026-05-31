@@ -42,7 +42,7 @@ func main() {
 	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager)
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, storageManager, previewService, cfg.Upload.ChunkSize)
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize)
 	clipboardService := service.NewClipboardService(clipboardRepo)
 	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter)
 

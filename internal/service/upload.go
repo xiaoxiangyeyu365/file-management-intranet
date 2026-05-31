@@ -4,8 +4,6 @@ package service
 import (
 	"cloudbox/internal/config"
 	"cloudbox/internal/model"
-	"cloudbox/internal/repository"
-	"cloudbox/internal/util/storage"
 	"context"
 	"crypto/md5"
 	"database/sql"
@@ -23,6 +21,7 @@ var (
 	ErrUploadNotFound = errors.New("upload not found")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrInvalidChunk   = errors.New("invalid chunk")
+	ErrQuotaExceeded  = errors.New("storage quota exceeded")
 )
 
 func validateMD5(md5 string) error {
@@ -46,25 +45,28 @@ func validateUploadID(uploadID string) error {
 }
 
 type UploadService struct {
-	fileRepo       *repository.FileRepository
-	physicalRepo   *repository.PhysicalFileRepository
-	storage        *storage.StorageManager
+	fileRepo       FileRepository
+	physicalRepo   PhysicalFileRepository
+	userRepo       UserRepository
+	storage        Storage
 	chunkSize      int64
-	previewService *PreviewService
+	previewService ImageProcessor
 }
 
 func NewUploadService(
-	fileRepo *repository.FileRepository,
-	physicalRepo *repository.PhysicalFileRepository,
-	storage *storage.StorageManager,
-	previewService *PreviewService,
+	fileRepo FileRepository,
+	physicalRepo PhysicalFileRepository,
+	userRepo UserRepository,
+	storage Storage,
+	previewService ImageProcessor,
+	chunkSize int64,
 ) *UploadService {
-	cfg := config.Get()
 	return &UploadService{
 		fileRepo:       fileRepo,
 		physicalRepo:   physicalRepo,
+		userRepo:       userRepo,
 		storage:        storage,
-		chunkSize:      cfg.Upload.ChunkSize,
+		chunkSize:      chunkSize,
 		previewService: previewService,
 	}
 }
@@ -84,6 +86,26 @@ type InitUploadResponse struct {
 	ChunksAlreadyDone []int       `json:"chunksAlreadyDone,omitempty"`
 }
 
+func (s *UploadService) checkQuota(ctx context.Context, userID, fileSize int64) error {
+	cfg := config.Get()
+	usage, err := s.physicalRepo.CalculateUserStorageUsage(ctx, userID)
+	if err != nil {
+		return err
+	}
+	quota := cfg.Disk.DefaultQuota
+	userQuota, err := s.userRepo.GetQuota(ctx, userID)
+	if err == nil && userQuota != nil {
+		quota = *userQuota
+	}
+	if quota == 0 {
+		return nil
+	}
+	if usage+fileSize > quota {
+		return ErrQuotaExceeded
+	}
+	return nil
+}
+
 func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUploadRequest) (*InitUploadResponse, error) {
 	// Validate MD5 format
 	if err := validateMD5(req.MD5); err != nil {
@@ -93,6 +115,11 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 	// Validate file name
 	if req.FileName == "" {
 		return nil, errors.New("file name is required")
+	}
+
+	// Check storage quota
+	if err := s.checkQuota(ctx, userID, req.FileSize); err != nil {
+		return nil, err
 	}
 
 	// Check for instant upload
@@ -245,6 +272,11 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 	// Verify size
 	if mergedSize != req.FileSize {
 		return nil, errors.New("file size mismatch")
+	}
+
+	// Check storage quota
+	if err := s.checkQuota(ctx, userID, req.FileSize); err != nil {
+		return nil, err
 	}
 
 	// Create physical file record

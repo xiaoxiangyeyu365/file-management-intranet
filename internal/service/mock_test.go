@@ -115,14 +115,16 @@ func (m *mockFileRepo) Search(ctx context.Context, userID int64, keyword string,
 }
 
 type mockPhysicalFileRepo struct {
-	createFn            func(ctx context.Context, pf *model.PhysicalFile) error
-	findByIDFn          func(ctx context.Context, id int64) (*model.PhysicalFile, error)
-	findByMD5Fn         func(ctx context.Context, md5 string) (*model.PhysicalFile, error)
-	incrementRefCountFn func(ctx context.Context, id int64) error
-	decrementRefCountFn func(ctx context.Context, id int64, count int) (int, error)
-	updateThumbnailFn   func(ctx context.Context, id int64, thumbnailPath string) error
-	deleteFn            func(ctx context.Context, id int64) error
-	updateFn            func(ctx context.Context, pf *model.PhysicalFile) error
+	createFn                        func(ctx context.Context, pf *model.PhysicalFile) error
+	findByIDFn                      func(ctx context.Context, id int64) (*model.PhysicalFile, error)
+	findByMD5Fn                     func(ctx context.Context, md5 string) (*model.PhysicalFile, error)
+	incrementRefCountFn             func(ctx context.Context, id int64) error
+	decrementRefCountFn             func(ctx context.Context, id int64, count int) (int, error)
+	updateThumbnailFn               func(ctx context.Context, id int64, thumbnailPath string) error
+	deleteFn                        func(ctx context.Context, id int64) error
+	updateFn                        func(ctx context.Context, pf *model.PhysicalFile) error
+	calculateUserStorageUsageFn     func(ctx context.Context, userID int64) (int64, error)
+	calculateAllUserStorageUsageFn  func(ctx context.Context) (map[int64]int64, error)
 }
 
 func (m *mockPhysicalFileRepo) Create(ctx context.Context, pf *model.PhysicalFile) error {
@@ -173,12 +175,26 @@ func (m *mockPhysicalFileRepo) Update(ctx context.Context, pf *model.PhysicalFil
 	}
 	return m.updateFn(ctx, pf)
 }
+func (m *mockPhysicalFileRepo) CalculateUserStorageUsage(ctx context.Context, userID int64) (int64, error) {
+	if m.calculateUserStorageUsageFn == nil {
+		return 0, nil
+	}
+	return m.calculateUserStorageUsageFn(ctx, userID)
+}
+func (m *mockPhysicalFileRepo) CalculateAllUserStorageUsage(ctx context.Context) (map[int64]int64, error) {
+	if m.calculateAllUserStorageUsageFn == nil {
+		return nil, nil
+	}
+	return m.calculateAllUserStorageUsageFn(ctx)
+}
 
 type mockUserRepo struct {
 	findByIDFn       func(ctx context.Context, id int64) (*model.User, error)
 	findByUsernameFn func(ctx context.Context, username string) (*model.User, error)
 	createFn         func(ctx context.Context, user *model.User) error
 	updatePasswordFn func(ctx context.Context, userID int64, passwordHash string) error
+	getQuotaFn       func(ctx context.Context, userID int64) (*int64, error)
+	setQuotaFn       func(ctx context.Context, userID int64, quota *int64) error
 }
 
 func (m *mockUserRepo) FindByID(ctx context.Context, id int64) (*model.User, error) {
@@ -204,6 +220,18 @@ func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID int64, passwor
 		panic("mockUserRepo.UpdatePassword not set")
 	}
 	return m.updatePasswordFn(ctx, userID, passwordHash)
+}
+func (m *mockUserRepo) GetQuota(ctx context.Context, userID int64) (*int64, error) {
+	if m.getQuotaFn == nil {
+		return nil, nil
+	}
+	return m.getQuotaFn(ctx, userID)
+}
+func (m *mockUserRepo) SetQuota(ctx context.Context, userID int64, quota *int64) error {
+	if m.setQuotaFn == nil {
+		return nil
+	}
+	return m.setQuotaFn(ctx, userID, quota)
 }
 
 type mockStorage struct {

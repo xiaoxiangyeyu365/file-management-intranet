@@ -41,6 +41,10 @@ func (h *UploadHandler) InitUpload(c *gin.Context) {
 
 	resp, err := h.uploadService.InitUpload(c.Request.Context(), userID, req)
 	if err != nil {
+		if err == service.ErrQuotaExceeded {
+			response.Error(c, 413, "存储空间不足，请清理文件或扩容")
+			return
+		}
 		response.Error(c, 400, err.Error())
 		return
 	}
@@ -141,6 +145,10 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 		}
 		if err == service.ErrChunkNotFound {
 			response.Error(c, 400, "missing chunks")
+			return
+		}
+		if err == service.ErrQuotaExceeded {
+			response.Error(c, 413, "存储空间不足，请清理文件或扩容")
 			return
 		}
 		response.Error(c, 400, err.Error())
