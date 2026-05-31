@@ -58,6 +58,7 @@ func main() {
 	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter)
 	adminHandler := handler.NewAdminHandler(adminService)
 	shareHandler := handler.NewShareHandler(shareService, fileService)
+	storageHandler := handler.NewStorageHandler(physicalRepo, userRepo)
 
 	// Setup Gin
 	r := gin.Default()
@@ -153,6 +154,9 @@ func main() {
 		protected.GET("/shares", shareHandler.ListFileShares)
 		protected.GET("/shares/mine", shareHandler.ListMyShares)
 		protected.DELETE("/shares/:id", shareHandler.RevokeShare)
+
+		// Storage
+		protected.GET("/storage/usage", storageHandler.GetUsage)
 		}
 
 	// Admin routes
