@@ -25,6 +25,7 @@ type Config struct {
 	Admin    AdminConfig    `yaml:"admin"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Share    ShareConfig    `yaml:"share"`
+	Disk     DiskConfig     `yaml:"disk"`
 }
 
 type ServerConfig struct {
@@ -80,6 +81,10 @@ type ShareConfig struct {
 	CredentialTTL int    `yaml:"credential_ttl"`
 }
 
+type DiskConfig struct {
+	DefaultQuota int64 `yaml:"default_quota"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -128,6 +133,9 @@ func Load() *Config {
 			Share: ShareConfig{
 				TokenLength:   8,
 				CredentialTTL: 300,
+			},
+			Disk: DiskConfig{
+				DefaultQuota: 10 * 1024 * 1024 * 1024, // 10GB
 			},
 		}
 
