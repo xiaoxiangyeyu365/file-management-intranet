@@ -141,4 +141,9 @@ export const shareAPI = {
   revoke: (id) => api.delete(`/shares/${id}`),
 }
 
+// Storage API
+export const storageAPI = {
+  getUsage: () => api.get('/storage/usage'),
+}
+
 export default api
