@@ -39,6 +39,8 @@ type UserRepository interface {
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	UpdatePassword(ctx context.Context, userID int64, passwordHash string) error
+	GetQuota(ctx context.Context, userID int64) (*int64, error)
+	SetQuota(ctx context.Context, userID int64, quota *int64) error
 }
 
 type Storage interface {

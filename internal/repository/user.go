@@ -75,3 +75,17 @@ func (r *UserRepository) UpdatePasswordChanged(ctx context.Context, userID int64
 func (r *UserRepository) DeleteByID(ctx context.Context, userID int64) error {
 	return r.db.WithContext(ctx).Delete(&model.User{}, userID).Error
 }
+
+func (r *UserRepository) GetQuota(ctx context.Context, userID int64) (*int64, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Select("disk_quota").First(&user, userID).Error; err != nil {
+		return nil, err
+	}
+	return user.DiskQuota, nil
+}
+
+func (r *UserRepository) SetQuota(ctx context.Context, userID int64, quota *int64) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("disk_quota", quota).Error
+}
