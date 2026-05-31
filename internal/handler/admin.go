@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"cloudbox/internal/model"
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/response"
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +33,11 @@ type ResetPasswordRequest struct {
 	NewPassword string `json:"newPassword" binding:"required,min=6"`
 }
 
+type adminUserResponse struct {
+	model.User
+	UsedBytes int64 `json:"usedBytes"`
+}
+
 func (h *AdminHandler) ListUsers(c *gin.Context) {
 	status := c.Query("status")
 
@@ -40,7 +47,28 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result)
+	// Batch fetch storage usage for all users
+	usageMap, err := h.adminService.GetAllUserStorageUsage(c.Request.Context())
+	if err != nil {
+		usageMap = make(map[int64]int64)
+	}
+
+	users := make([]adminUserResponse, 0, len(result.Users))
+	for _, u := range result.Users {
+		users = append(users, adminUserResponse{
+			User:      u,
+			UsedBytes: usageMap[u.ID],
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"users":        users,
+			"total":        result.Total,
+			"pendingCount": result.PendingCount,
+		},
+	})
 }
 
 func (h *AdminHandler) CreateUser(c *gin.Context) {
@@ -123,4 +151,27 @@ func (h *AdminHandler) DeleteUser(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+func (h *AdminHandler) UpdateUserQuota(c *gin.Context) {
+	var req struct {
+		DiskQuota *int64 `json:"disk_quota"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid user id")
+		return
+	}
+
+	if err := h.adminService.SetUserQuota(c.Request.Context(), id, req.DiskQuota); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, nil)
 }

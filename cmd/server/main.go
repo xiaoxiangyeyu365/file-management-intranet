@@ -167,6 +167,7 @@ func main() {
 		admin.POST("/users", adminHandler.CreateUser)
 		admin.PUT("/users/:id", adminHandler.UpdateUser)
 		admin.PUT("/users/:id/password", adminHandler.ResetPassword)
+		admin.PUT("/users/:id/quota", adminHandler.UpdateUserQuota)
 		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 	}
 

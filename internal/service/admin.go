@@ -4,7 +4,6 @@ package service
 import (
 	"cloudbox/internal/model"
 	"cloudbox/internal/repository"
-	"cloudbox/internal/util/crypto"
 	"context"
 	"errors"
 	"log"
@@ -22,6 +21,7 @@ type AdminService struct {
 	physicalRepo  *repository.PhysicalFileRepository
 	clipboardRepo *repository.ClipboardRepository
 	fileService   *FileService
+	hasher        PasswordHasher
 }
 
 func NewAdminService(
@@ -30,6 +30,7 @@ func NewAdminService(
 	physicalRepo *repository.PhysicalFileRepository,
 	clipboardRepo *repository.ClipboardRepository,
 	fileService *FileService,
+	hasher PasswordHasher,
 ) *AdminService {
 	return &AdminService{
 		userRepo:      userRepo,
@@ -37,6 +38,7 @@ func NewAdminService(
 		physicalRepo:  physicalRepo,
 		clipboardRepo: clipboardRepo,
 		fileService:   fileService,
+		hasher:        hasher,
 	}
 }
 
@@ -83,7 +85,7 @@ func (s *AdminService) CreateUser(ctx context.Context, username, password, role 
 		role = "user"
 	}
 
-	hash, err := crypto.HashPassword(password)
+	hash, err := s.hasher.HashPassword(password)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +124,7 @@ func (s *AdminService) UpdateUser(ctx context.Context, adminID, userID int64, ro
 }
 
 func (s *AdminService) ResetPassword(ctx context.Context, userID int64, newPassword string) error {
-	hash, err := crypto.HashPassword(newPassword)
+	hash, err := s.hasher.HashPassword(newPassword)
 	if err != nil {
 		return err
 	}
@@ -218,4 +220,12 @@ func removeFileIfExists(path string) error {
 		return os.Remove(path)
 	}
 	return nil
+}
+
+func (s *AdminService) SetUserQuota(ctx context.Context, userID int64, quota *int64) error {
+	return s.userRepo.SetQuota(ctx, userID, quota)
+}
+
+func (s *AdminService) GetAllUserStorageUsage(ctx context.Context) (map[int64]int64, error) {
+	return s.physicalRepo.CalculateAllUserStorageUsage(ctx)
 }
