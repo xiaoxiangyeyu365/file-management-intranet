@@ -48,6 +48,13 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="存储" width="180">
+        <template #default="{ row }">
+          <span>{{ formatBytes(row.usedBytes) }}</span>
+          <span v-if="row.diskQuota"> / {{ formatBytes(row.diskQuota) }}</span>
+          <span v-else> / 全局默认</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" width="180">
         <template #default="{ row }">
           {{ formatDate(row.createdAt) }}
@@ -55,6 +62,32 @@
       </el-table-column>
       <el-table-column label="操作" min-width="240" fixed="right">
         <template #default="{ row }">
+          <el-popover trigger="click" width="280" placement="left">
+            <template #reference>
+              <el-button size="small" link>配额</el-button>
+            </template>
+            <div>
+              <el-radio-group v-model="quotaMode" style="display: flex; flex-direction: column; gap: 8px;">
+                <el-radio value="global">使用全局默认</el-radio>
+                <el-radio value="unlimited">无限制</el-radio>
+                <el-radio value="custom">自定义</el-radio>
+              </el-radio-group>
+              <el-input
+                v-if="quotaMode === 'custom'"
+                v-model="customQuotaGB"
+                type="number"
+                min="0.1"
+                step="0.1"
+                placeholder="GB"
+                style="margin-top: 8px;"
+              >
+                <template #append>GB</template>
+              </el-input>
+              <el-button type="primary" size="small" style="margin-top: 8px; width: 100%;" @click="handleQuotaChange(row)">
+                保存
+              </el-button>
+            </div>
+          </el-popover>
           <el-button
             v-if="row.status === 'pending'"
             type="success"
@@ -141,6 +174,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAdminStore } from '@/stores/admin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
@@ -210,6 +244,31 @@ function formatDate(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   return d.toLocaleString('zh-CN')
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+const quotaMode = ref('global')
+const customQuotaGB = ref(10)
+
+async function handleQuotaChange(user) {
+  let quota = null
+  if (quotaMode.value === 'unlimited') quota = 0
+  else if (quotaMode.value === 'custom') quota = Math.round(customQuotaGB.value * 1024 * 1024 * 1024)
+
+  try {
+    await axios.put(`/admin/users/${user.id}/quota`, { disk_quota: quota })
+    ElMessage.success('配额已更新')
+    fetchUsers()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.message || '更新失败')
+  }
 }
 
 async function handleApprove(user) {
