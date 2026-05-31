@@ -16,6 +16,7 @@ type User struct {
 	Status          string    `gorm:"size:20;default:approved" json:"status"`
 	PasswordChanged bool      `gorm:"default:true" json:"passwordChanged"`
 	CreatedAt       time.Time `json:"createdAt"`
+	DiskQuota       *int64    `gorm:"column:disk_quota" json:"diskQuota"`
 }
 
 func (User) TableName() string {

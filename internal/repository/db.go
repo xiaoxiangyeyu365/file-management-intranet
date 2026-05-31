@@ -51,6 +51,12 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	DB.Exec("UPDATE users SET status = 'approved' WHERE status IS NULL OR status = ''")
 	DB.Exec("UPDATE users SET password_changed = 1 WHERE password_changed IS NULL")
 
+	// Add disk_quota column (safe to ignore "duplicate column" errors)
+	if err := DB.Exec("ALTER TABLE users ADD COLUMN disk_quota BIGINT NULL").Error; err != nil {
+		// SQLite may error on duplicate column — that's fine, column already exists
+		log.Printf("disk_quota column migration: %v (may already exist)", err)
+	}
+
 	// Create files table (GORM doesn't handle it well with custom fields)
 	if err := createFilesTable(); err != nil {
 		log.Fatalf("failed to create files table: %v", err)
