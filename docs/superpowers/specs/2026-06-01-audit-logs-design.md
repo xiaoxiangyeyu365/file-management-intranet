@@ -25,7 +25,7 @@ CREATE INDEX idx_audit_action ON audit_logs(action);
 CREATE INDEX idx_audit_time   ON audit_logs(created_at);
 ```
 
-`username` is denormalized to avoid JOINs on every query. `detail` stores JSON for additional context (e.g. `{"deletedFiles":3,"deletedFolders":1}`).
+`username` is denormalized to avoid JOINs on every query. `detail` stores JSON for additional context (e.g. `{"deletedFiles":3,"deletedFolders":1}`). Detail is truncated to 4KB max in the Record method to prevent oversized entries.
 
 ## Action Enum
 
@@ -54,6 +54,8 @@ CREATE INDEX idx_audit_time   ON audit_logs(created_at);
 | Admin | `admin.update_status` | User status changed |
 | Admin | `admin.set_quota` | Quota set |
 
+Future extensions (not in scope): `folder.delete`, `folder.rename`, `folder.download`, etc.
+
 ## Architecture
 
 ```
@@ -63,6 +65,8 @@ Service method → audit.Record(ctx, action, targetType, targetID, targetName, d
                       ↓
                 background goroutine: batch INSERT (≤50 or 500ms flush)
 ```
+
+If a batch INSERT fails (e.g. disk full), the goroutine logs the error but does not retry — entries are lost. This prevents unbounded retry queues. The `DroppedCount` metric includes batch-write failures.
 
 ### AuditRecorder Interface
 
@@ -87,7 +91,7 @@ type AuditService struct {
 ```
 
 Methods:
-- `Record` — checks `closed` first; if closed, increments `dropped` and returns. Otherwise pushes to channel. If channel full, increments `dropped` and logs warning.
+- `Record` — checks `closed` first; if closed, increments `dropped` and returns. Otherwise pushes to channel. If channel full, increments `dropped` and logs warning. Truncates `detail` to 4KB if longer.
 - `Shutdown` — sets `closed=true`, closes channel, waits on `wg`
 - `DroppedCount` — returns `dropped.Load()`
 
@@ -126,7 +130,7 @@ GET /api/admin/audit-logs
 | `targetType` | string | Filter by target type |
 | `startDate` | string | Start time (RFC3339) |
 | `endDate` | string | End time (RFC3339) |
-| `keyword` | string | Search targetName / detail |
+| `keyword` | string | Search targetName (LIKE); detail excluded from LIKE for performance |
 | `page` | int | Page number, default 1 |
 | `pageSize` | int | Page size, default 50 |
 
@@ -158,7 +162,7 @@ type AuditConfig struct {
 }
 ```
 
-Background goroutine (started in `main.go` alongside `StartTempCleanup`), runs once per day at midnight. Deletes rows where `created_at < NOW() - retention_days`. If `retention_days == 0`, cleanup is disabled.
+Background goroutine (started in `main.go` alongside `StartTempCleanup`), runs once per day at midnight. Deletes rows where `created_at < NOW() - retention_days`. If `retention_days == 0`, cleanup is disabled. On first startup, executes cleanup after a 2-minute delay to handle any pre-existing stale data.
 
 ## Frontend
 
