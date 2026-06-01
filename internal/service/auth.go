@@ -102,6 +102,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 	}
 
 	if !s.hasher.CheckPassword(password, user.PasswordHash) {
+		s.audit.Record(ctx, "user.login_failed", "user", 0, username, "")
 		return nil, ErrInvalidCredentials
 	}
 
@@ -124,6 +125,8 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 	if err != nil {
 		return nil, err
 	}
+
+	s.audit.Record(ctx, "user.login", "user", user.ID, user.Username, "")
 
 	return &LoginResponse{
 		Token:                token,
@@ -150,7 +153,13 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPwd, 
 		return err
 	}
 
-	return s.userRepo.UpdatePassword(ctx, userID, newHash)
+	if err := s.userRepo.UpdatePassword(ctx, userID, newHash); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "user.change_password", "user", userID, "", "")
+
+	return nil
 }
 
 func (s *AuthService) GetUserByID(ctx context.Context, userID int64) (*model.User, error) {

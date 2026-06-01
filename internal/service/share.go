@@ -99,6 +99,8 @@ func (s *ShareService) CreateShare(ctx context.Context, userID, fileID int64, pa
 		return nil, fmt.Errorf("failed to create share: %w", err)
 	}
 
+	s.audit.Record(ctx, "share.create", "share", share.ID, fmt.Sprintf("token=%s", share.Token), fmt.Sprintf(`{"fileId":%d,"hasPassword":%v}`, fileID, password != ""))
+
 	return share, nil
 }
 
@@ -211,6 +213,8 @@ func (s *ShareService) DownloadByShare(ctx context.Context, token, credential st
 		return nil, nil, fmt.Errorf("failed to find physical file: %w", err)
 	}
 
+	s.audit.Record(ctx, "share.download", "share", share.ID, file.Name, fmt.Sprintf(`{"token":"%s"}`, token))
+
 	return file, pf, nil
 }
 
@@ -239,7 +243,13 @@ func (s *ShareService) ListFileShares(ctx context.Context, userID, fileID int64)
 
 // RevokeShare revokes a share link.
 func (s *ShareService) RevokeShare(ctx context.Context, userID, shareID int64) error {
-	return s.shareRepo.Revoke(ctx, shareID, userID)
+	if err := s.shareRepo.Revoke(ctx, shareID, userID); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "share.revoke", "share", shareID, "", "")
+
+	return nil
 }
 
 // ---------- internal helpers ----------

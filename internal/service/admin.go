@@ -6,6 +6,7 @@ import (
 	"cloudbox/internal/repository"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 )
@@ -105,6 +106,8 @@ func (s *AdminService) CreateUser(ctx context.Context, username, password, role 
 		return nil, err
 	}
 
+	s.audit.Record(ctx, "admin.create_user", "user", user.ID, user.Username, fmt.Sprintf(`{"role":"%s"}`, role))
+
 	return user, nil
 }
 
@@ -122,6 +125,7 @@ func (s *AdminService) UpdateUser(ctx context.Context, adminID, userID int64, ro
 		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
 			return err
 		}
+		s.audit.Record(ctx, "admin.update_status", "user", userID, "", fmt.Sprintf(`{"status":"%s"}`, status))
 	}
 	return nil
 }
@@ -137,7 +141,13 @@ func (s *AdminService) ResetPassword(ctx context.Context, userID int64, newPassw
 	}
 
 	// Force password change on next login
-	return s.userRepo.UpdatePasswordChanged(ctx, userID, false)
+	if err := s.userRepo.UpdatePasswordChanged(ctx, userID, false); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "admin.reset_password", "user", userID, "", "")
+
+	return nil
 }
 
 type DeleteUserResult struct {
@@ -215,6 +225,8 @@ func (s *AdminService) DeleteUser(ctx context.Context, adminID, userID int64) (*
 		return nil, err
 	}
 
+	s.audit.Record(ctx, "admin.delete_user", "user", userID, "", fmt.Sprintf(`{"deletedFiles":%d,"deletedFolders":%d}`, result.DeletedFiles, result.DeletedFolders))
+
 	return result, nil
 }
 
@@ -226,7 +238,21 @@ func removeFileIfExists(path string) error {
 }
 
 func (s *AdminService) SetUserQuota(ctx context.Context, userID int64, quota *int64) error {
-	return s.userRepo.SetQuota(ctx, userID, quota)
+	if err := s.userRepo.SetQuota(ctx, userID, quota); err != nil {
+		return err
+	}
+
+	quotaStr := "global"
+	if quota != nil {
+		if *quota == 0 {
+			quotaStr = "unlimited"
+		} else {
+			quotaStr = fmt.Sprintf("%d", *quota)
+		}
+	}
+	s.audit.Record(ctx, "admin.set_quota", "user", userID, "", fmt.Sprintf(`{"quota":"%s"}`, quotaStr))
+
+	return nil
 }
 
 func (s *AdminService) GetAllUserStorageUsage(ctx context.Context) (map[int64]int64, error) {

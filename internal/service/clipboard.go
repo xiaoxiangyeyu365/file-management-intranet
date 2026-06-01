@@ -64,6 +64,8 @@ func (s *ClipboardService) Create(ctx context.Context, req CreateClipboardReques
 		s.repo.DeleteOldestUnpinned(ctx, req.UserID, deleteCount)
 	}
 
+	s.audit.Record(ctx, "clipboard.create", "clipboard", record.ID, record.DeviceName, "")
+
 	return record, nil
 }
 
@@ -84,7 +86,13 @@ func (s *ClipboardService) Delete(ctx context.Context, userID, recordID int64) e
 	if err != nil {
 		return ErrClipboardNotFound
 	}
-	return s.repo.DeleteByID(ctx, recordID)
+	if err := s.repo.DeleteByID(ctx, recordID); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "clipboard.delete", "clipboard", recordID, "", "")
+
+	return nil
 }
 
 func (s *ClipboardService) ClearUnpinned(ctx context.Context, userID int64) error {

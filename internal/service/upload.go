@@ -140,6 +140,8 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 			return nil, fmt.Errorf("failed to increment ref count: %w", err)
 		}
 
+		s.audit.Record(ctx, "file.upload", "file", file.ID, req.FileName, fmt.Sprintf(`{"size":%d,"instant":true}`, req.FileSize))
+
 		return &InitUploadResponse{
 			Instant: true,
 			File:    file,
@@ -325,6 +327,8 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 	if s.previewService != nil {
 		go s.previewService.ProcessImage(context.Background(), pf.ID)
 	}
+
+	s.audit.Record(ctx, "file.upload", "file", file.ID, req.FileName, fmt.Sprintf(`{"size":%d,"instant":false}`, req.FileSize))
 
 	return file, nil
 }

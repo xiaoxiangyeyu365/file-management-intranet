@@ -103,6 +103,8 @@ func (s *FileService) CreateFolder(ctx context.Context, userID, parentID int64, 
 		return nil, err
 	}
 
+	s.audit.Record(ctx, "folder.create", "folder", folder.ID, folder.Name, "")
+
 	return folder, nil
 }
 
@@ -128,10 +130,21 @@ func (s *FileService) Rename(ctx context.Context, userID, fileID int64, newName 
 		return ErrNameConflict
 	}
 
+	oldName := file.Name
 	file.Name = newName
 	file.UpdatedAt = time.Now()
 
-	return s.fileRepo.Update(ctx, file)
+	if err := s.fileRepo.Update(ctx, file); err != nil {
+		return err
+	}
+
+	targetType := "file"
+	if file.IsFolder {
+		targetType = "folder"
+	}
+	s.audit.Record(ctx, "file.rename", targetType, file.ID, file.Name, fmt.Sprintf(`{"oldName":"%s"}`, oldName))
+
+	return nil
 }
 
 func (s *FileService) MoveToTrash(ctx context.Context, userID, fileID int64) error {
@@ -143,7 +156,17 @@ func (s *FileService) MoveToTrash(ctx context.Context, userID, fileID int64) err
 		return fmt.Errorf("failed to find file for trash: %w", err)
 	}
 
-	return s.fileRepo.SoftDelete(ctx, file.ID)
+	if err := s.fileRepo.SoftDelete(ctx, file.ID); err != nil {
+		return err
+	}
+
+	targetType := "file"
+	if file.IsFolder {
+		targetType = "folder"
+	}
+	s.audit.Record(ctx, "file.delete", targetType, file.ID, file.Name, "")
+
+	return nil
 }
 
 func (s *FileService) MoveFiles(ctx context.Context, userID int64, fileIDs []int64, targetFolderID int64) error {
@@ -185,7 +208,13 @@ func (s *FileService) MoveFiles(ctx context.Context, userID int64, fileIDs []int
 		}
 	}
 
-	return s.fileRepo.BatchUpdateParent(ctx, fileIDs, targetFolderID)
+	if err := s.fileRepo.BatchUpdateParent(ctx, fileIDs, targetFolderID); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "file.move", "file", 0, "", fmt.Sprintf(`{"count":%d,"targetFolder":%d}`, len(fileIDs), targetFolderID))
+
+	return nil
 }
 
 func (s *FileService) ListTrash(ctx context.Context, userID int64) ([]model.File, error) {
@@ -232,7 +261,13 @@ func (s *FileService) RestoreFile(ctx context.Context, userID, fileID int64) err
 		newName = fmt.Sprintf("%s (恢复)_%s%s", base, time.Now().Format("20060102_150405"), ext)
 	}
 
-	return s.fileRepo.Restore(ctx, fileID, newParentID, newName)
+	if err := s.fileRepo.Restore(ctx, fileID, newParentID, newName); err != nil {
+		return err
+	}
+
+	s.audit.Record(ctx, "file.restore", "file", fileID, file.Name, "")
+
+	return nil
 }
 
 func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64) error {
@@ -263,6 +298,11 @@ func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64)
 		if err := s.fileRepo.Delete(ctx, f.ID); err != nil {
 			return err
 		}
+		targetType := "file"
+		if f.IsFolder {
+			targetType = "folder"
+		}
+		s.audit.Record(ctx, "file.permanent_delete", targetType, f.ID, f.Name, "")
 	}
 
 	// Handle physical files
@@ -321,6 +361,8 @@ func (s *FileService) DownloadFile(ctx context.Context, userID, fileID int64) (*
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to find physical file: %w", err)
 	}
+
+	s.audit.Record(ctx, "file.download", "file", file.ID, file.Name, "")
 
 	return file, pf, nil
 }
@@ -680,6 +722,8 @@ func (s *FileService) EmptyTrash(ctx context.Context, userID int64) (int, error)
 			}
 		}
 	}
+
+	s.audit.Record(ctx, "trash.empty", "trash", 0, "", fmt.Sprintf(`{"count":%d}`, len(trashFiles)))
 
 	return len(trashFiles), nil
 }
