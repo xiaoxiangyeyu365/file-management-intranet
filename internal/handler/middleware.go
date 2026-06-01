@@ -3,6 +3,7 @@ package handler
 import (
 	"cloudbox/internal/util/crypto"
 	"cloudbox/internal/util/response"
+	"context"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,13 @@ func JWTMiddleware() gin.HandlerFunc {
 		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+
+		// Inject user info into request context for audit logging
+		ctx := context.WithValue(c.Request.Context(), "userID", claims.UserID)
+		ctx = context.WithValue(ctx, "username", claims.Username)
+		ctx = context.WithValue(ctx, "clientIP", c.ClientIP())
+		c.Request = c.Request.WithContext(ctx)
+
 		c.Next()
 	}
 }
