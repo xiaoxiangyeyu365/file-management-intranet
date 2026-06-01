@@ -3,6 +3,7 @@ package service
 import (
 	"cloudbox/internal/model"
 	"context"
+	"time"
 )
 
 type FileRepository interface {
@@ -73,4 +74,14 @@ type ShareRepository interface {
 	FindByFile(ctx context.Context, fileID int64) ([]model.FileShare, error)
 	Revoke(ctx context.Context, id, ownerID int64) error
 	IncrementDownloadCount(ctx context.Context, token string) (bool, error)
+}
+
+type AuditRepository interface {
+	BatchCreate(ctx context.Context, logs []model.AuditLog) error
+	FindWithFilter(ctx context.Context, action string, userID int64, targetType string, keyword string, startDate, endDate *time.Time, page, pageSize int) ([]model.AuditLog, int64, error)
+	DeleteBefore(ctx context.Context, before time.Time) (int64, error)
+}
+
+type AuditRecorder interface {
+	Record(ctx context.Context, action, targetType string, targetID int64, targetName, detail string)
 }
