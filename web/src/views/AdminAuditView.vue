@@ -114,7 +114,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import axios from 'axios'
+import { adminAPI } from '@/utils/api'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
@@ -174,8 +174,8 @@ async function fetchLogs() {
       params.startDate = filters.dateRange[0]
       params.endDate = filters.dateRange[1]
     }
-    const res = await axios.get('/admin/audit-logs', { params })
-    const data = res.data.data
+    const res = await adminAPI.listAuditLogs(params)
+    const data = res.data
     logs.value = data.logs || []
     total.value = data.total || 0
   } catch (err) {

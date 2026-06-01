@@ -124,7 +124,8 @@ export const adminAPI = {
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
   resetPassword: (id, newPassword) =>
     api.put(`/admin/users/${id}/password`, { newPassword }),
-  deleteUser: (id) => api.delete(`/admin/users/${id}`)
+  deleteUser: (id) => api.delete(`/admin/users/${id}`),
+  listAuditLogs: (params) => api.get('/admin/audit-logs', { params })
 }
 
 // Share API
