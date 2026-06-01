@@ -36,6 +36,7 @@ type ShareService struct {
 	storage      Storage
 	fileService  *FileService
 	hasher       PasswordHasher
+	audit        AuditRecorder
 }
 
 func NewShareService(
@@ -45,6 +46,7 @@ func NewShareService(
 	storage Storage,
 	fileService *FileService,
 	hasher PasswordHasher,
+	audit AuditRecorder,
 ) *ShareService {
 	return &ShareService{
 		shareRepo:    shareRepo,
@@ -53,6 +55,7 @@ func NewShareService(
 		storage:      storage,
 		fileService:  fileService,
 		hasher:       hasher,
+		audit:        audit,
 	}
 }
 

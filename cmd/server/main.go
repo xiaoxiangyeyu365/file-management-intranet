@@ -39,12 +39,17 @@ func main() {
 
 	// Initialize services
 	cryptoAdapter := service.NewCryptoAdapter()
-	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password)
+
+	// Initialize audit service
+	auditRepo := repository.NewAuditRepository(db)
+	auditService := service.NewAuditService(auditRepo)
+
+	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password, auditService)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
-	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager)
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota)
-	clipboardService := service.NewClipboardService(clipboardRepo)
-	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter)
+	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService)
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService)
+	clipboardService := service.NewClipboardService(clipboardRepo, auditService)
+	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter, auditService)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
@@ -55,7 +60,7 @@ func main() {
 	clipboardHandler := handler.NewClipboardHandler(clipboardService)
 
 	// Initialize admin service and handler
-	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter)
+	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter, auditService)
 	adminHandler := handler.NewAdminHandler(adminService)
 	shareHandler := handler.NewShareHandler(shareService, fileService)
 	storageHandler := handler.NewStorageHandler(physicalRepo, userRepo)

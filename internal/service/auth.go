@@ -25,6 +25,7 @@ type AuthService struct {
 	registration  bool
 	approvalReq   bool
 	adminPassword string
+	audit         AuditRecorder
 }
 
 func NewAuthService(
@@ -34,6 +35,7 @@ func NewAuthService(
 	registration bool,
 	approvalReq bool,
 	adminPassword string,
+	audit AuditRecorder,
 ) *AuthService {
 	return &AuthService{
 		userRepo:      userRepo,
@@ -42,6 +44,7 @@ func NewAuthService(
 		registration:  registration,
 		approvalReq:   approvalReq,
 		adminPassword: adminPassword,
+		audit:         audit,
 	}
 }
 

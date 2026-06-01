@@ -22,6 +22,7 @@ type AdminService struct {
 	clipboardRepo *repository.ClipboardRepository
 	fileService   *FileService
 	hasher        PasswordHasher
+	audit         AuditRecorder
 }
 
 func NewAdminService(
@@ -31,6 +32,7 @@ func NewAdminService(
 	clipboardRepo *repository.ClipboardRepository,
 	fileService *FileService,
 	hasher PasswordHasher,
+	audit AuditRecorder,
 ) *AdminService {
 	return &AdminService{
 		userRepo:      userRepo,
@@ -39,6 +41,7 @@ func NewAdminService(
 		clipboardRepo: clipboardRepo,
 		fileService:   fileService,
 		hasher:        hasher,
+		audit:         audit,
 	}
 }
 

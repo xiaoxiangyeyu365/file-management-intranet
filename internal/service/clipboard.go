@@ -19,11 +19,12 @@ const (
 )
 
 type ClipboardService struct {
-	repo *repository.ClipboardRepository
+	repo  *repository.ClipboardRepository
+	audit AuditRecorder
 }
 
-func NewClipboardService(repo *repository.ClipboardRepository) *ClipboardService {
-	return &ClipboardService{repo: repo}
+func NewClipboardService(repo *repository.ClipboardRepository, audit AuditRecorder) *ClipboardService {
+	return &ClipboardService{repo: repo, audit: audit}
 }
 
 type CreateClipboardRequest struct {

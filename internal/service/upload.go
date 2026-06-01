@@ -51,6 +51,7 @@ type UploadService struct {
 	chunkSize      int64
 	previewService ImageProcessor
 	defaultQuota   int64
+	audit          AuditRecorder
 }
 
 func NewUploadService(
@@ -61,6 +62,7 @@ func NewUploadService(
 	previewService ImageProcessor,
 	chunkSize int64,
 	defaultQuota int64,
+	audit AuditRecorder,
 ) *UploadService {
 	return &UploadService{
 		fileRepo:       fileRepo,
@@ -70,6 +72,7 @@ func NewUploadService(
 		chunkSize:      chunkSize,
 		previewService: previewService,
 		defaultQuota:   defaultQuota,
+		audit:          audit,
 	}
 }
 

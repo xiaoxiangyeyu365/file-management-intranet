@@ -129,7 +129,7 @@ func TestAuthService_Register(t *testing.T) {
 				tt.setupMock(userRepo, hasher)
 			}
 
-			svc := NewAuthService(userRepo, hasher, tokenGen, tt.regOpen, tt.approvalReq, "admin123")
+			svc := NewAuthService(userRepo, hasher, tokenGen, tt.regOpen, tt.approvalReq, "admin123", noopAudit)
 			err := svc.Register(context.Background(), tt.username, tt.password)
 
 			if tt.wantErr != nil {
@@ -281,7 +281,7 @@ func TestAuthService_Login(t *testing.T) {
 			tokenGen := &mockTokenGenerator{}
 			tt.setupMock(userRepo, hasher, tokenGen)
 
-			svc := NewAuthService(userRepo, hasher, tokenGen, true, false, tt.adminPwd)
+			svc := NewAuthService(userRepo, hasher, tokenGen, true, false, tt.adminPwd, noopAudit)
 			resp, err := svc.Login(context.Background(), tt.username, tt.password)
 
 			if tt.wantErr != nil {
@@ -397,7 +397,7 @@ func TestAuthService_ChangePassword(t *testing.T) {
 			hasher := &mockPasswordHasher{}
 			tt.setupMock(userRepo, hasher)
 
-			svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "admin123")
+			svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "admin123", noopAudit)
 			err := svc.ChangePassword(context.Background(), 1, tt.oldPwd, tt.newPwd)
 
 			if tt.wantErr != nil {

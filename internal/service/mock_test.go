@@ -5,6 +5,12 @@ import (
 	"context"
 )
 
+type noopAuditRecorder struct{}
+
+func (noopAuditRecorder) Record(ctx context.Context, action, targetType string, targetID int64, targetName, detail string) {}
+
+var noopAudit = noopAuditRecorder{}
+
 type mockFileRepo struct {
 	createFn              func(ctx context.Context, file *model.File) error
 	findByIDFn            func(ctx context.Context, id int64) (*model.File, error)

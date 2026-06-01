@@ -15,7 +15,7 @@ import (
 
 // newTestShareService builds a ShareService with the given mocks.
 func newTestShareService(sr *mockShareRepo, fr *mockFileRepo, pr *mockPhysicalFileRepo) *ShareService {
-	return NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}}, &mockPasswordHasher{})
+	return NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}, audit: noopAudit}, &mockPasswordHasher{}, noopAudit)
 }
 
 // ensureConfig loads the config singleton once so that generateToken/generateCredential
@@ -181,7 +181,7 @@ func TestShareService_CreateShare(t *testing.T) {
 				tt.setup(sr, fr, ph)
 			}
 
-			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}}, ph)
+			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}, audit: noopAudit}, ph, noopAudit)
 			share, err := svc.CreateShare(context.Background(), tt.userID, tt.fileID, tt.password, tt.expiresAt, tt.maxDownloads)
 
 			if tt.wantErr != nil {
@@ -434,7 +434,7 @@ func TestShareService_VerifyOrGetCredential(t *testing.T) {
 			ph := &mockPasswordHasher{}
 			tt.setup(sr, ph)
 
-			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}}, ph)
+			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}, audit: noopAudit}, ph, noopAudit)
 			cred, err := svc.VerifyOrGetCredential(context.Background(), tt.token, tt.password)
 
 			if tt.wantErr != nil {
@@ -654,7 +654,7 @@ func TestShareService_DownloadByShare(t *testing.T) {
 
 			tt.setup(sr, fr, pr)
 
-			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}}, ph)
+			svc := NewShareService(sr, fr, pr, &mockStorage{}, &FileService{fileRepo: fr, physicalRepo: pr, storage: &mockStorage{}, audit: noopAudit}, ph, noopAudit)
 
 			var credential string
 			if tt.needCredential {

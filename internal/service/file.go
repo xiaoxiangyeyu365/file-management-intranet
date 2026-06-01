@@ -39,17 +39,20 @@ type FileService struct {
 	fileRepo     FileRepository
 	physicalRepo PhysicalFileRepository
 	storage      Storage
+	audit        AuditRecorder
 }
 
 func NewFileService(
 	fileRepo FileRepository,
 	physicalRepo PhysicalFileRepository,
 	storage Storage,
+	audit AuditRecorder,
 ) *FileService {
 	return &FileService{
 		fileRepo:     fileRepo,
 		physicalRepo: physicalRepo,
 		storage:      storage,
+		audit:        audit,
 	}
 }
 
