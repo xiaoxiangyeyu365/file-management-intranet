@@ -77,6 +77,11 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to create file_shares table: %v", err)
 	}
 
+	// Create audit_logs table
+	if err := createAuditLogsTable(); err != nil {
+		log.Fatalf("failed to create audit_logs table: %v", err)
+	}
+
 	// Create default admin
 	createDefaultAdmin(cfg)
 
@@ -232,6 +237,62 @@ func createFileSharesTable() error {
 			created_at DATETIME NOT NULL,
 			INDEX idx_file_shares_file_id (file_id),
 			INDEX idx_file_shares_owner_id (owner_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func createAuditLogsTable() error {
+	// Check if table exists
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_logs'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'cloudbox' AND table_name = 'audit_logs'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id BIGINT NOT NULL,
+			username VARCHAR(50) NOT NULL,
+			action VARCHAR(50) NOT NULL,
+			target_type VARCHAR(30) NOT NULL,
+			target_id BIGINT,
+			target_name VARCHAR(255),
+			detail TEXT,
+			ip_address VARCHAR(45),
+			created_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		// Create indexes separately for SQLite
+		DB.Exec("CREATE INDEX idx_audit_user ON audit_logs(user_id)")
+		DB.Exec("CREATE INDEX idx_audit_action ON audit_logs(action)")
+		DB.Exec("CREATE INDEX idx_audit_time ON audit_logs(created_at)")
+	} else {
+		sql := `CREATE TABLE audit_logs (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			user_id BIGINT NOT NULL,
+			username VARCHAR(50) NOT NULL,
+			action VARCHAR(50) NOT NULL,
+			target_type VARCHAR(30) NOT NULL,
+			target_id BIGINT,
+			target_name VARCHAR(255),
+			detail TEXT,
+			ip_address VARCHAR(45),
+			created_at DATETIME NOT NULL,
+			INDEX idx_audit_user (user_id),
+			INDEX idx_audit_action (action),
+			INDEX idx_audit_time (created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 		if err := DB.Exec(sql).Error; err != nil {
 			return err
