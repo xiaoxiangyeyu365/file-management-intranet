@@ -183,6 +183,13 @@ func main() {
 		admin.GET("/audit-logs", adminHandler.ListAuditLogs)
 	}
 
+	// WebDAV routes
+	davHandler := handler.NewWebDAVHandler(fileService, uploadService, auditService, storageManager)
+	davAuth := handler.BasicAuthMiddleware(authService, auditService)
+	r.Any("/dav/*path", davAuth, func(c *gin.Context) {
+		davHandler.ServeHTTP(c.Writer, c.Request)
+	})
+
 	// Serve static files (must be after API routes)
 	r.Static("/assets", "./static/assets")
 
