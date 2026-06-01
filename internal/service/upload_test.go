@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"cloudbox/internal/model"
+	"cloudbox/internal/util/storage"
+	"gorm.io/gorm"
 )
 
 const testDefaultQuota = 10 * 1024 * 1024 * 1024 // 10GB
@@ -442,5 +445,227 @@ func TestUploadService_CompleteUpload(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- UploadFile tests ---
+
+func TestUploadFile_BasicUpload(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := storage.NewStorageManager(
+		filepath.Join(tmpDir, "files"),
+		filepath.Join(tmpDir, "temp"),
+		filepath.Join(tmpDir, "thumbs"),
+	)
+
+	content := []byte("hello webdav upload")
+
+	fr := &mockFileRepo{
+		createFn: func(ctx context.Context, file *model.File) error {
+			file.ID = 42
+			return nil
+		},
+	}
+	pr := &mockPhysicalFileRepo{
+		findByMD5Fn: func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, pf *model.PhysicalFile) error {
+			pf.ID = 10
+			return nil
+		},
+		updateFn: func(ctx context.Context, pf *model.PhysicalFile) error {
+			return nil
+		},
+	}
+	ur := &mockUserRepo{}
+
+	var processedID int64
+	done := make(chan struct{}, 1)
+	img := &mockImageProcessor{
+		processImageFn: func(ctx context.Context, physicalID int64) error {
+			processedID = physicalID
+			done <- struct{}{}
+			return nil
+		},
+	}
+
+	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit)
+	reader := bytes.NewReader(content)
+
+	file, err := svc.UploadFile(context.Background(), 1, 0, "test.txt", int64(len(content)), reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if file == nil {
+		t.Fatal("expected non-nil file")
+	}
+	if file.Name != "test.txt" {
+		t.Errorf("file.Name = %q, want %q", file.Name, "test.txt")
+	}
+	if file.ContentRef != 10 {
+		t.Errorf("file.ContentRef = %d, want 10", file.ContentRef)
+	}
+
+	// Verify physical file was stored at the expected location
+	_, abs := sm.GenerateFilePath(10, ".txt")
+	stored, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatalf("stored file not found: %v", err)
+	}
+	if !bytes.Equal(stored, content) {
+		t.Errorf("stored file content mismatch")
+	}
+
+	// Verify ProcessImage was called asynchronously
+	select {
+	case <-done:
+		if processedID != 10 {
+			t.Errorf("ProcessImage called with physicalID %d, want 10", processedID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("ProcessImage was not called")
+	}
+}
+
+func TestUploadFile_InstantUpload(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := storage.NewStorageManager(
+		filepath.Join(tmpDir, "files"),
+		filepath.Join(tmpDir, "temp"),
+		filepath.Join(tmpDir, "thumbs"),
+	)
+
+	content := []byte("duplicate content")
+	h := md5.Sum(content)
+	md5Str := hex.EncodeToString(h[:])
+
+	existingPF := &model.PhysicalFile{ID: 7, MD5: md5Str, Size: int64(len(content))}
+
+	var refIncremented bool
+	fr := &mockFileRepo{
+		createFn: func(ctx context.Context, file *model.File) error {
+			file.ID = 99
+			return nil
+		},
+	}
+	pr := &mockPhysicalFileRepo{
+		findByMD5Fn: func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
+			if md5 == md5Str {
+				return existingPF, nil
+			}
+			return nil, gorm.ErrRecordNotFound
+		},
+		incrementRefCountFn: func(ctx context.Context, id int64) error {
+			if id != 7 {
+				t.Errorf("IncrementRefCount called with id %d, want 7", id)
+			}
+			refIncremented = true
+			return nil
+		},
+	}
+	ur := &mockUserRepo{}
+
+	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+	reader := bytes.NewReader(content)
+
+	file, err := svc.UploadFile(context.Background(), 1, 0, "dup.txt", int64(len(content)), reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if file == nil {
+		t.Fatal("expected non-nil file")
+	}
+	if file.ContentRef != 7 {
+		t.Errorf("file.ContentRef = %d, want 7 (reused PhysicalFile)", file.ContentRef)
+	}
+	if !refIncremented {
+		t.Error("IncrementRefCount was not called")
+	}
+}
+
+func TestUploadFile_QuotaExceeded(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := storage.NewStorageManager(
+		filepath.Join(tmpDir, "files"),
+		filepath.Join(tmpDir, "temp"),
+		filepath.Join(tmpDir, "thumbs"),
+	)
+
+	content := []byte("too much data")
+
+	fr := &mockFileRepo{}
+	pr := &mockPhysicalFileRepo{
+		findByMD5Fn: func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		calculateUserStorageUsageFn: func(ctx context.Context, userID int64) (int64, error) {
+			return testDefaultQuota, nil // already at limit
+		},
+	}
+	ur := &mockUserRepo{}
+
+	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+	reader := bytes.NewReader(content)
+
+	file, err := svc.UploadFile(context.Background(), 1, 0, "big.txt", int64(len(content)), reader)
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("got error %v, want os.ErrPermission", err)
+	}
+	if file != nil {
+		t.Errorf("expected nil file on quota exceeded, got %+v", file)
+	}
+}
+
+func TestUploadFile_UnknownSize(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := storage.NewStorageManager(
+		filepath.Join(tmpDir, "files"),
+		filepath.Join(tmpDir, "temp"),
+		filepath.Join(tmpDir, "thumbs"),
+	)
+
+	content := []byte("size unknown to caller")
+
+	var capturedSize int64
+	fr := &mockFileRepo{
+		createFn: func(ctx context.Context, file *model.File) error {
+			file.ID = 55
+			return nil
+		},
+	}
+	pr := &mockPhysicalFileRepo{
+		findByMD5Fn: func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+		createFn: func(ctx context.Context, pf *model.PhysicalFile) error {
+			capturedSize = pf.Size
+			pf.ID = 20
+			return nil
+		},
+		updateFn: func(ctx context.Context, pf *model.PhysicalFile) error {
+			return nil
+		},
+	}
+	ur := &mockUserRepo{}
+
+	img := &mockImageProcessor{
+		processImageFn: func(ctx context.Context, physicalID int64) error {
+			return nil
+		},
+	}
+	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit)
+	reader := bytes.NewReader(content)
+
+	// Pass size=0 (unknown Content-Length)
+	file, err := svc.UploadFile(context.Background(), 1, 0, "unknown.txt", 0, reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if file == nil {
+		t.Fatal("expected non-nil file")
+	}
+	if capturedSize != int64(len(content)) {
+		t.Errorf("PhysicalFile.Size = %d, want %d (actual content length)", capturedSize, len(content))
 	}
 }

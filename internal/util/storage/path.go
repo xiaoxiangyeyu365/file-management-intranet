@@ -21,6 +21,16 @@ var (
 	storageOnce    sync.Once
 )
 
+// NewStorageManager creates a StorageManager with explicit directory paths.
+// Useful for testing.
+func NewStorageManager(rootDir, tempDir, thumbnailDir string) *StorageManager {
+	return &StorageManager{
+		rootDir:      rootDir,
+		tempDir:      tempDir,
+		thumbnailDir: thumbnailDir,
+	}
+}
+
 func InitStorage(cfg *config.Config) *StorageManager {
 	storageOnce.Do(func() {
 		storageManager = &StorageManager{

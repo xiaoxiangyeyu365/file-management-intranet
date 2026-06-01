@@ -376,6 +376,110 @@ func detectMimeType(filename string) string {
 	return "application/octet-stream"
 }
 
+func (s *UploadService) UploadFile(ctx context.Context, userID, parentID int64,
+	name string, size int64, reader io.Reader) (*model.File, error) {
+
+	// 1. Validate name is not empty
+	if name == "" {
+		return nil, errors.New("file name is required")
+	}
+
+	// 2. Write reader to temp file, computing MD5 via io.MultiWriter and accumulating actual size
+	tempFile, err := os.CreateTemp("", "webdav-upload-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+
+	hash := md5.New()
+	multiWriter := io.MultiWriter(tempFile, hash)
+
+	actualSize, err := io.Copy(multiWriter, reader)
+	tempFile.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	md5Hex := hex.EncodeToString(hash.Sum(nil))
+
+	// 3. If size == 0 (unknown Content-Length), use actual size from step 2
+	if size == 0 {
+		size = actualSize
+	}
+
+	// 4. Quota check — s.checkQuota(ctx, userID, size). On failure → return os.ErrPermission
+	if err := s.checkQuota(ctx, userID, size); err != nil {
+		if errors.Is(err, ErrQuotaExceeded) {
+			return nil, os.ErrPermission
+		}
+		return nil, err
+	}
+
+	// 5. Instant upload check — s.physicalRepo.FindByMD5(ctx, md5Hex)
+	pf, err := s.physicalRepo.FindByMD5(ctx, md5Hex)
+	if err == nil {
+		// Hit → reuse existing PhysicalFile
+		if err := s.physicalRepo.IncrementRefCount(ctx, pf.ID); err != nil {
+			return nil, fmt.Errorf("failed to increment ref count: %w", err)
+		}
+
+		file, err := s.createFileRecord(ctx, userID, name, parentID, pf)
+		if err != nil {
+			return nil, err
+		}
+
+		s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":true}`, size))
+		return file, nil
+	}
+
+	// Miss → create PhysicalFile
+	pf = &model.PhysicalFile{
+		MD5:      md5Hex,
+		Size:     size,
+		MimeType: detectMimeType(name),
+	}
+
+	if err := s.physicalRepo.Create(ctx, pf); err != nil {
+		return nil, err
+	}
+
+	// Generate storage path
+	ext := filepath.Ext(name)
+	relative, absolute := s.storage.GenerateFilePath(pf.ID, ext)
+	pf.StoragePath = relative
+
+	// Ensure parent directory
+	s.storage.EnsureParentDir(absolute)
+
+	// Move temp file to permanent storage
+	if err := os.Rename(tempPath, absolute); err != nil {
+		// Fallback: copy
+		if copyErr := copyFile(tempPath, absolute); copyErr != nil {
+			return nil, fmt.Errorf("failed to move/copy file: %w", copyErr)
+		}
+	}
+
+	// Update physical file with storage path
+	if err := s.physicalRepo.Update(ctx, pf); err != nil {
+		return nil, fmt.Errorf("failed to update physical file: %w", err)
+	}
+
+	// Create file record
+	file, err := s.createFileRecord(ctx, userID, name, parentID, pf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process image asynchronously (thumbnail + metadata)
+	if s.previewService != nil {
+		go s.previewService.ProcessImage(context.Background(), pf.ID)
+	}
+
+	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":false}`, size))
+	return file, nil
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
