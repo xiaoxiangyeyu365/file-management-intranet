@@ -9,8 +9,13 @@ import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/storage"
 	"cloudbox/static"
+	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	_ "cloudbox/docs" // Swagger docs
@@ -43,6 +48,7 @@ func main() {
 	// Initialize audit service
 	auditRepo := repository.NewAuditRepository(db)
 	auditService := service.NewAuditService(auditRepo)
+	startAuditCleanup(auditRepo, cfg.Audit.RetentionDays)
 
 	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password, auditService)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
@@ -194,8 +200,55 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Server starting at http://%s", addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{Addr: addr, Handler: r}
+	go func() {
+		log.Printf("Server starting at http://%s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	auditService.Shutdown()
+	log.Println("Server exited")
+}
+
+func startAuditCleanup(auditRepo *repository.AuditRepository, retentionDays int) {
+	if retentionDays <= 0 {
+		return
+	}
+
+	go func() {
+		time.Sleep(2 * time.Minute)
+		cleanupAuditLogs(auditRepo, retentionDays)
+
+		for {
+			now := time.Now()
+			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+			time.Sleep(next.Sub(now))
+			cleanupAuditLogs(auditRepo, retentionDays)
+		}
+	}()
+}
+
+func cleanupAuditLogs(auditRepo *repository.AuditRepository, retentionDays int) {
+	before := time.Now().AddDate(0, 0, -retentionDays)
+	affected, err := auditRepo.DeleteBefore(context.Background(), before)
+	if err != nil {
+		log.Printf("[audit-cleanup] error: %v", err)
+		return
+	}
+	if affected > 0 {
+		log.Printf("[audit-cleanup] removed %d audit log(s) older than %d days", affected, retentionDays)
 	}
 }

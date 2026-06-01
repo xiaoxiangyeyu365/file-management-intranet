@@ -26,6 +26,7 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth"`
 	Share    ShareConfig    `yaml:"share"`
 	Disk     DiskConfig     `yaml:"disk"`
+	Audit    AuditConfig    `yaml:"audit"`
 }
 
 type ServerConfig struct {
@@ -85,6 +86,10 @@ type DiskConfig struct {
 	DefaultQuota int64 `yaml:"default_quota"`
 }
 
+type AuditConfig struct {
+	RetentionDays int `yaml:"retention_days"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -136,6 +141,9 @@ func Load() *Config {
 			},
 			Disk: DiskConfig{
 				DefaultQuota: 10 * 1024 * 1024 * 1024, // 10GB
+			},
+			Audit: AuditConfig{
+				RetentionDays: 90,
 			},
 		}
 
