@@ -254,9 +254,182 @@ func serviceErrorToOSError(err error) error {
 	}
 }
 
-// OpenFile is a stub -- will be implemented in Task 5.
+// OpenFile implements webdav.FileSystem.
 func (fs *cloudFS) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	return nil, fmt.Errorf("not implemented")
+	userID := GetUserIDFromContext(ctx)
+
+	// Write mode — PUT
+	if flag&(os.O_WRONLY|os.O_CREATE) != 0 {
+		return fs.openForWrite(ctx, userID, name)
+	}
+
+	// Read mode — GET or PROPFIND
+	file, err := fs.resolvePath(ctx, userID, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if file.ID == 0 {
+		// Virtual root — return directory listing
+		return &cloudDir{
+			fs:       fs,
+			ctx:      ctx,
+			userID:   userID,
+			parentID: 0,
+		}, nil
+	}
+
+	if file.IsFolder {
+		return &cloudDir{
+			fs:       fs,
+			ctx:      ctx,
+			userID:   userID,
+			parentID: file.ID,
+			file:     file,
+		}, nil
+	}
+
+	// File — open physical file for reading
+	if file.ContentRef == 0 || file.Physical == nil {
+		return nil, os.ErrNotExist
+	}
+
+	absPath := fs.storage.ToAbsPath(file.Physical.StoragePath)
+	physicalFile, err := os.Open(absPath)
+	if err != nil {
+		return nil, os.ErrNotExist
+	}
+
+	return &cloudFile{
+		File:     physicalFile,
+		fileInfo: &cloudFileInfo{file: file},
+	}, nil
+}
+
+func (fs *cloudFS) openForWrite(ctx context.Context, userID int64, name string) (webdav.File, error) {
+	parentPath, fileName := splitParent(name)
+	parent, err := fs.resolvePath(ctx, userID, parentPath)
+	if err != nil {
+		return nil, os.ErrNotExist
+	}
+
+	// Check if file already exists → soft delete old version
+	existing, err := fs.resolvePath(ctx, userID, name)
+	if err == nil && existing.ID != 0 {
+		_ = fs.fileService.MoveToTrash(ctx, userID, existing.ID)
+	}
+
+	return &cloudWriteFile{
+		fs:       fs,
+		ctx:      ctx,
+		userID:   userID,
+		parentID: parent.ID,
+		fileName: fileName,
+	}, nil
+}
+
+// cloudFile wraps os.File for reading. Implements webdav.File.
+type cloudFile struct {
+	*os.File
+	fileInfo os.FileInfo
+}
+
+func (f *cloudFile) Readdir(count int) ([]os.FileInfo, error) {
+	return nil, fmt.Errorf("not a directory")
+}
+
+func (f *cloudFile) Stat() (os.FileInfo, error) {
+	return f.fileInfo, nil
+}
+
+func (f *cloudFile) Write(p []byte) (int, error) {
+	return 0, os.ErrPermission
+}
+
+// cloudDir implements webdav.File for directory listings.
+type cloudDir struct {
+	fs       *cloudFS
+	ctx      context.Context
+	userID   int64
+	parentID int64
+	file     *model.File
+}
+
+func (d *cloudDir) Read(p []byte) (int, error)                          { return 0, fmt.Errorf("is a directory") }
+func (d *cloudDir) Write(p []byte) (int, error)                        { return 0, fmt.Errorf("is a directory") }
+func (d *cloudDir) Seek(offset int64, whence int) (int64, error)       { return 0, fmt.Errorf("is a directory") }
+func (d *cloudDir) Close() error                                        { return nil }
+
+func (d *cloudDir) Readdir(count int) ([]os.FileInfo, error) {
+	files, err := d.fs.fileService.ListFiles(d.ctx, d.userID, d.parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	infos := make([]os.FileInfo, 0, len(files))
+	for i := range files {
+		infos = append(infos, &cloudFileInfo{file: &files[i]})
+	}
+
+	if count > 0 && len(infos) > count {
+		return infos[:count], nil
+	}
+	return infos, nil
+}
+
+func (d *cloudDir) Stat() (os.FileInfo, error) {
+	if d.file != nil {
+		return &cloudFileInfo{file: d.file}, nil
+	}
+	return &virtualRootInfo{userID: d.userID}, nil
+}
+
+// cloudWriteFile buffers a PUT body and flushes to UploadFile on Close.
+type cloudWriteFile struct {
+	fs       *cloudFS
+	ctx      context.Context
+	userID   int64
+	parentID int64
+	fileName string
+	buf      []byte
+	closed   bool
+}
+
+func (f *cloudWriteFile) Read(p []byte) (int, error)                          { return 0, fmt.Errorf("write-only") }
+func (f *cloudWriteFile) Seek(offset int64, whence int) (int64, error)       { return 0, fmt.Errorf("write-only") }
+func (f *cloudWriteFile) Readdir(count int) ([]os.FileInfo, error)           { return nil, fmt.Errorf("not a directory") }
+
+func (f *cloudWriteFile) Write(p []byte) (int, error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
+	f.buf = append(f.buf, p...)
+	return len(p), nil
+}
+
+func (f *cloudWriteFile) Close() error {
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+
+	if len(f.buf) == 0 {
+		return nil
+	}
+
+	reader := strings.NewReader(string(f.buf))
+	_, err := f.fs.uploadService.UploadFile(f.ctx, f.userID, f.parentID, f.fileName, int64(len(f.buf)), reader)
+	if err != nil {
+		return serviceErrorToOSError(err)
+	}
+	return nil
+}
+
+func (f *cloudWriteFile) Stat() (os.FileInfo, error) {
+	return &cloudFileInfo{file: &model.File{
+		Name:     f.fileName,
+		IsFolder: false,
+	}}, nil
 }
 
 // Copy is a stub -- will be implemented in Task 6.
