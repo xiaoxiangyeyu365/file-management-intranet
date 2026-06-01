@@ -162,6 +162,26 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPwd, 
 	return nil
 }
 
+func (s *AuthService) ValidateCredentials(ctx context.Context, username, password string) (*model.User, error) {
+	user, err := s.userRepo.FindByUsername(ctx, username)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if !s.hasher.CheckPassword(password, user.PasswordHash) {
+		return nil, ErrInvalidCredentials
+	}
+
+	if user.Status == model.UserStatusPending {
+		return nil, ErrAccountPending
+	}
+	if user.Status == model.UserStatusDisabled {
+		return nil, ErrAccountDisabled
+	}
+
+	return user, nil
+}
+
 func (s *AuthService) GetUserByID(ctx context.Context, userID int64) (*model.User, error) {
 	return s.userRepo.FindByID(ctx, userID)
 }

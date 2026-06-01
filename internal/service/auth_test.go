@@ -303,6 +303,93 @@ func TestAuthService_Login(t *testing.T) {
 	}
 }
 
+func TestValidateCredentials_Success(t *testing.T) {
+	userRepo := &mockUserRepo{
+		findByUsernameFn: func(ctx context.Context, username string) (*model.User, error) {
+			return &model.User{ID: 1, Username: "testuser", Role: "user", PasswordHash: "hash", Status: model.UserStatusApproved, PasswordChanged: true}, nil
+		},
+	}
+	hasher := &mockPasswordHasher{
+		checkPasswordFn: func(password, hash string) bool { return true },
+	}
+
+	svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "", noopAudit)
+	user, err := svc.ValidateCredentials(context.Background(), "testuser", "password123")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if user == nil {
+		t.Fatal("expected user, got nil")
+	}
+	if user.ID != 1 {
+		t.Errorf("expected user ID 1, got %d", user.ID)
+	}
+}
+
+func TestValidateCredentials_WrongPassword(t *testing.T) {
+	userRepo := &mockUserRepo{
+		findByUsernameFn: func(ctx context.Context, username string) (*model.User, error) {
+			return &model.User{ID: 1, Username: "testuser", PasswordHash: "hash", Status: model.UserStatusApproved}, nil
+		},
+	}
+	hasher := &mockPasswordHasher{
+		checkPasswordFn: func(password, hash string) bool { return false },
+	}
+
+	svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "", noopAudit)
+	user, err := svc.ValidateCredentials(context.Background(), "testuser", "wrongpass")
+
+	if err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected nil user, got %+v", user)
+	}
+}
+
+func TestValidateCredentials_PendingAccount(t *testing.T) {
+	userRepo := &mockUserRepo{
+		findByUsernameFn: func(ctx context.Context, username string) (*model.User, error) {
+			return &model.User{ID: 2, Username: "pendinguser", PasswordHash: "hash", Status: model.UserStatusPending}, nil
+		},
+	}
+	hasher := &mockPasswordHasher{
+		checkPasswordFn: func(password, hash string) bool { return true },
+	}
+
+	svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "", noopAudit)
+	user, err := svc.ValidateCredentials(context.Background(), "pendinguser", "password123")
+
+	if err != ErrAccountPending {
+		t.Fatalf("expected ErrAccountPending, got %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected nil user, got %+v", user)
+	}
+}
+
+func TestValidateCredentials_DisabledAccount(t *testing.T) {
+	userRepo := &mockUserRepo{
+		findByUsernameFn: func(ctx context.Context, username string) (*model.User, error) {
+			return &model.User{ID: 3, Username: "disableduser", PasswordHash: "hash", Status: model.UserStatusDisabled}, nil
+		},
+	}
+	hasher := &mockPasswordHasher{
+		checkPasswordFn: func(password, hash string) bool { return true },
+	}
+
+	svc := NewAuthService(userRepo, hasher, &mockTokenGenerator{}, true, false, "", noopAudit)
+	user, err := svc.ValidateCredentials(context.Background(), "disableduser", "password123")
+
+	if err != ErrAccountDisabled {
+		t.Fatalf("expected ErrAccountDisabled, got %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected nil user, got %+v", user)
+	}
+}
+
 func TestAuthService_ChangePassword(t *testing.T) {
 	tests := []struct {
 		name      string
