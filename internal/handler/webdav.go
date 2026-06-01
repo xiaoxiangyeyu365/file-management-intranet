@@ -432,7 +432,79 @@ func (f *cloudWriteFile) Stat() (os.FileInfo, error) {
 	}}, nil
 }
 
-// Copy is a stub -- will be implemented in Task 6.
+// Copy implements webdav.FileSystem.
 func (fs *cloudFS) Copy(ctx context.Context, src, dst string, recursive bool) (int, error) {
-	return http.StatusNotImplemented, fmt.Errorf("not implemented")
+	userID := GetUserIDFromContext(ctx)
+
+	srcFile, err := fs.resolvePath(ctx, userID, src)
+	if err != nil {
+		return http.StatusNotFound, err
+	}
+
+	dstParentPath, dstBaseName := splitParent(dst)
+	dstParent, err := fs.resolvePath(ctx, userID, dstParentPath)
+	if err != nil {
+		return http.StatusConflict, os.ErrExist
+	}
+
+	// Check if destination exists
+	dstTarget, err := fs.resolvePath(ctx, userID, dst)
+	if err == nil && dstTarget.ID != 0 {
+		if dstTarget.IsFolder {
+			dstBaseName = srcFile.Name
+			dstParent = dstTarget
+		} else {
+			_ = fs.fileService.MoveToTrash(ctx, userID, dstTarget.ID)
+		}
+	}
+
+	if srcFile.IsFolder {
+		return fs.copyFolder(ctx, userID, srcFile, dstParent.ID, dstBaseName)
+	}
+
+	return fs.copyFile(ctx, userID, srcFile, dstParent.ID, dstBaseName)
+}
+
+func (fs *cloudFS) copyFile(ctx context.Context, userID int64, src *model.File, dstParentID int64, dstName string) (int, error) {
+	if src.ContentRef == 0 || src.Physical == nil {
+		return http.StatusNotFound, os.ErrNotExist
+	}
+
+	pf := src.Physical
+	if err := fs.uploadService.CreateFileFromPhysical(ctx, userID, dstParentID, dstName, pf); err != nil {
+		return http.StatusInternalServerError, serviceErrorToOSError(err)
+	}
+
+	fs.audit.Record(ctx, "file.copy", "file", src.ID, src.Name, fmt.Sprintf(`{"dst":"%s"}`, dstName))
+	return http.StatusCreated, nil
+}
+
+func (fs *cloudFS) copyFolder(ctx context.Context, userID int64, src *model.File, dstParentID int64, dstName string) (int, error) {
+	newFolder, err := fs.fileService.CreateFolder(ctx, userID, dstParentID, dstName)
+	if err != nil {
+		if err == service.ErrNameConflict {
+			return http.StatusPreconditionFailed, os.ErrExist
+		}
+		return http.StatusInternalServerError, err
+	}
+
+	children, err := fs.fileService.ListFiles(ctx, userID, src.ID)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+
+	for _, child := range children {
+		if child.IsFolder {
+			if _, err := fs.copyFolder(ctx, userID, &child, newFolder.ID, child.Name); err != nil {
+				return http.StatusInternalServerError, err
+			}
+		} else {
+			if _, err := fs.copyFile(ctx, userID, &child, newFolder.ID, child.Name); err != nil {
+				return http.StatusInternalServerError, err
+			}
+		}
+	}
+
+	fs.audit.Record(ctx, "folder.copy", "folder", src.ID, src.Name, fmt.Sprintf(`{"dst":"%s"}`, dstName))
+	return http.StatusCreated, nil
 }

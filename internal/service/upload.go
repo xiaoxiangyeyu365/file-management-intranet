@@ -376,6 +376,27 @@ func detectMimeType(filename string) string {
 	return "application/octet-stream"
 }
 
+// CreateFileFromPhysical creates a new file record pointing to an existing PhysicalFile.
+// Used by WebDAV COPY to avoid re-reading/writing file content.
+func (s *UploadService) CreateFileFromPhysical(ctx context.Context, userID, parentID int64, name string, pf *model.PhysicalFile) error {
+	if err := s.physicalRepo.IncrementRefCount(ctx, pf.ID); err != nil {
+		return fmt.Errorf("failed to increment ref count: %w", err)
+	}
+
+	file, err := s.createFileRecord(ctx, userID, name, parentID, pf)
+	if err != nil {
+		s.physicalRepo.DecrementRefCount(ctx, pf.ID, 1)
+		return err
+	}
+
+	if s.previewService != nil {
+		go s.previewService.ProcessImage(context.Background(), pf.ID)
+	}
+
+	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":true,"copy":true}`, pf.Size))
+	return nil
+}
+
 func (s *UploadService) UploadFile(ctx context.Context, userID, parentID int64,
 	name string, size int64, reader io.Reader) (*model.File, error) {
 
