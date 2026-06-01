@@ -22,10 +22,12 @@
               <el-option label="永久删除" value="file.permanent_delete" />
               <el-option label="重命名" value="file.rename" />
               <el-option label="移动" value="file.move" />
+              <el-option label="复制" value="file.copy" />
               <el-option label="下载" value="file.download" />
             </el-option-group>
             <el-option-group label="文件夹">
               <el-option label="创建文件夹" value="folder.create" />
+              <el-option label="复制文件夹" value="folder.copy" />
             </el-option-group>
             <el-option-group label="回收站">
               <el-option label="清空回收站" value="trash.empty" />
@@ -141,8 +143,8 @@ function actionLabel(action) {
   const map = {
     'user.login': '登录', 'user.login_failed': '登录失败', 'user.change_password': '修改密码',
     'file.upload': '上传', 'file.delete': '删除', 'file.restore': '恢复',
-    'file.permanent_delete': '永久删除', 'file.rename': '重命名', 'file.move': '移动',
-    'file.download': '下载', 'folder.create': '创建文件夹', 'trash.empty': '清空回收站',
+    'file.permanent_delete': '永久删除', 'file.rename': '重命名', 'file.move': '移动', 'file.copy': '复制',
+    'file.download': '下载', 'folder.create': '创建文件夹', 'folder.copy': '复制文件夹', 'trash.empty': '清空回收站',
     'share.create': '创建分享', 'share.revoke': '撤销分享', 'share.download': '分享下载',
     'clipboard.create': '创建剪切板', 'clipboard.delete': '删除剪切板',
     'admin.create_user': '创建用户', 'admin.delete_user': '删除用户',
