@@ -4,7 +4,8 @@ import { authAPI } from '@/utils/api'
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
-    token: localStorage.getItem('cloudbox_token') || null
+    token: localStorage.getItem('cloudbox_token') || null,
+    requirePasswordChange: false
   }),
 
   getters: {
@@ -17,6 +18,7 @@ export const useAuthStore = defineStore('auth', {
       const response = await authAPI.login(username, password)
       const data = response.data || response
       this.token = data.token
+      this.requirePasswordChange = data.requirePasswordChange || false
       localStorage.setItem('cloudbox_token', data.token)
       await this.fetchProfile()
       return data
@@ -30,11 +32,17 @@ export const useAuthStore = defineStore('auth', {
     logout() {
       this.token = null
       this.user = null
+      this.requirePasswordChange = false
       localStorage.removeItem('cloudbox_token')
     },
 
     async changePassword(oldPassword, newPassword) {
-      return await authAPI.changePassword(oldPassword, newPassword)
+      const result = await authAPI.changePassword(oldPassword, newPassword)
+      this.requirePasswordChange = false
+      if (this.user) {
+        this.user.passwordChanged = true
+      }
+      return result
     },
 
     async fetchProfile() {
@@ -45,7 +53,11 @@ export const useAuthStore = defineStore('auth', {
         this.user = {
           id: userData.id,
           username: userData.username,
-          role: userData.role
+          role: userData.role,
+          passwordChanged: userData.passwordChanged
+        }
+        if (!userData.passwordChanged) {
+          this.requirePasswordChange = true
         }
         return this.user
       } catch (error) {

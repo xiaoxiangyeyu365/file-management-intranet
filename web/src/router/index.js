@@ -6,6 +6,7 @@ import TrashView from '@/views/TrashView.vue'
 import ClipboardView from '@/views/ClipboardView.vue'
 import RegisterView from '@/views/RegisterView.vue'
 import AdminUsersView from '@/views/AdminUsersView.vue'
+import ForcePasswordChangeView from '@/views/ForcePasswordChangeView.vue'
 
 const routes = [
   {
@@ -19,6 +20,12 @@ const routes = [
     name: 'Register',
     component: RegisterView,
     meta: { guest: true }
+  },
+  {
+    path: '/change-password',
+    name: 'ForcePasswordChange',
+    component: ForcePasswordChangeView,
+    meta: { requiresAuth: true }
   },
   {
     path: '/',
@@ -76,6 +83,8 @@ router.beforeEach(async (to, from, next) => {
 
   if (to.meta.requiresAuth && !authStore.token) {
     next('/login')
+  } else if (authStore.requirePasswordChange && to.name !== 'ForcePasswordChange') {
+    next('/change-password')
   } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
     next('/')
   } else if (to.meta.guest && authStore.user) {

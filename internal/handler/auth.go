@@ -171,8 +171,9 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"role":     user.Role,
+		"id":              user.ID,
+		"username":        user.Username,
+		"role":            user.Role,
+		"passwordChanged": user.PasswordChanged,
 	})
 }

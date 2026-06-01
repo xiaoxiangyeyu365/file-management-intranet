@@ -2,7 +2,6 @@
 package service
 
 import (
-	"cloudbox/internal/config"
 	"cloudbox/internal/model"
 	"context"
 	"crypto/md5"
@@ -51,6 +50,7 @@ type UploadService struct {
 	storage        Storage
 	chunkSize      int64
 	previewService ImageProcessor
+	defaultQuota   int64
 }
 
 func NewUploadService(
@@ -60,6 +60,7 @@ func NewUploadService(
 	storage Storage,
 	previewService ImageProcessor,
 	chunkSize int64,
+	defaultQuota int64,
 ) *UploadService {
 	return &UploadService{
 		fileRepo:       fileRepo,
@@ -68,6 +69,7 @@ func NewUploadService(
 		storage:        storage,
 		chunkSize:      chunkSize,
 		previewService: previewService,
+		defaultQuota:   defaultQuota,
 	}
 }
 
@@ -87,12 +89,11 @@ type InitUploadResponse struct {
 }
 
 func (s *UploadService) checkQuota(ctx context.Context, userID, fileSize int64) error {
-	cfg := config.Get()
 	usage, err := s.physicalRepo.CalculateUserStorageUsage(ctx, userID)
 	if err != nil {
 		return err
 	}
-	quota := cfg.Disk.DefaultQuota
+	quota := s.defaultQuota
 	userQuota, err := s.userRepo.GetQuota(ctx, userID)
 	if err == nil && userQuota != nil {
 		quota = *userQuota

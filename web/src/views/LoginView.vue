@@ -66,7 +66,6 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -100,9 +99,10 @@ async function handleLogin() {
   try {
     const data = await authStore.login(form.username, form.password)
     if (data.requirePasswordChange) {
-      ElMessage.warning('请修改默认密码')
+      router.push('/change-password')
+    } else {
+      router.push('/')
     }
-    router.push('/')
   } catch (err) {
     error.value = err.response?.data?.message || '登录失败，请检查用户名和密码'
   } finally {

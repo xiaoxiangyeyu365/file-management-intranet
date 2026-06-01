@@ -2,10 +2,7 @@
 package service
 
 import (
-	"cloudbox/internal/config"
 	"cloudbox/internal/model"
-	"cloudbox/internal/repository"
-	"cloudbox/internal/util/crypto"
 	"context"
 	"errors"
 )
@@ -22,16 +19,34 @@ var (
 )
 
 type AuthService struct {
-	userRepo *repository.UserRepository
+	userRepo      UserRepository
+	hasher        PasswordHasher
+	tokenGen      TokenGenerator
+	registration  bool
+	approvalReq   bool
+	adminPassword string
 }
 
-func NewAuthService(userRepo *repository.UserRepository) *AuthService {
-	return &AuthService{userRepo: userRepo}
+func NewAuthService(
+	userRepo UserRepository,
+	hasher PasswordHasher,
+	tokenGen TokenGenerator,
+	registration bool,
+	approvalReq bool,
+	adminPassword string,
+) *AuthService {
+	return &AuthService{
+		userRepo:      userRepo,
+		hasher:        hasher,
+		tokenGen:      tokenGen,
+		registration:  registration,
+		approvalReq:   approvalReq,
+		adminPassword: adminPassword,
+	}
 }
 
 func (s *AuthService) Register(ctx context.Context, username, password string) error {
-	cfg := config.Get()
-	if !cfg.Auth.Registration {
+	if !s.registration {
 		return ErrRegistrationClosed
 	}
 
@@ -51,13 +66,13 @@ func (s *AuthService) Register(ctx context.Context, username, password string) e
 		return ErrUsernameExists
 	}
 
-	hash, err := crypto.HashPassword(password)
+	hash, err := s.hasher.HashPassword(password)
 	if err != nil {
 		return err
 	}
 
 	status := model.UserStatusApproved
-	if cfg.Auth.ApprovalRequired {
+	if s.approvalReq {
 		status = model.UserStatusPending
 	}
 
@@ -83,7 +98,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 		return nil, ErrInvalidCredentials
 	}
 
-	if !crypto.CheckPassword(password, user.PasswordHash) {
+	if !s.hasher.CheckPassword(password, user.PasswordHash) {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -98,12 +113,11 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 	// Check if password needs to be changed
 	requireChange := !user.PasswordChanged
 	// Also check default admin password
-	cfg := config.Get()
-	if password == cfg.Admin.Password {
+	if password == s.adminPassword {
 		requireChange = true
 	}
 
-	token, err := crypto.GenerateToken(user.ID, user.Username, user.Role)
+	token, err := s.tokenGen.GenerateToken(user.ID, user.Username, user.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +134,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPwd, 
 		return ErrUserNotFound
 	}
 
-	if !crypto.CheckPassword(oldPwd, user.PasswordHash) {
+	if !s.hasher.CheckPassword(oldPwd, user.PasswordHash) {
 		return ErrInvalidCredentials
 	}
 
@@ -128,7 +142,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPwd, 
 		return ErrSamePassword
 	}
 
-	newHash, err := crypto.HashPassword(newPwd)
+	newHash, err := s.hasher.HashPassword(newPwd)
 	if err != nil {
 		return err
 	}

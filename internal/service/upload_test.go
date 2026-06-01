@@ -15,31 +15,75 @@ import (
 	"cloudbox/internal/model"
 )
 
+const testDefaultQuota = 10 * 1024 * 1024 * 1024 // 10GB
+
 func TestUploadService_InitUpload(t *testing.T) {
 	tests := []struct {
-		name      string
-		req       InitUploadRequest
-		userID    int64
-		setup     func(*mockFileRepo, *mockPhysicalFileRepo, *mockStorage)
-		wantErr   string
+		name        string
+		req         InitUploadRequest
+		userID      int64
+		setup       func(*mockFileRepo, *mockPhysicalFileRepo, *mockUserRepo, *mockStorage)
+		wantErr     string
 		wantInstant bool
 	}{
 		{
 			name: "invalid_md5",
 			req:  InitUploadRequest{MD5: "invalid", FileName: "test.txt", FileSize: 100, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {},
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {},
 			wantErr: "invalid MD5 format",
 		},
 		{
 			name: "empty_filename",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "", FileSize: 0, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {},
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {},
 			wantErr: "file name is required",
+		},
+		{
+			name: "quota_exceeded",
+			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "big.txt", FileSize: 1024, TargetFolderID: 0},
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
+				pr.calculateUserStorageUsageFn = func(ctx context.Context, userID int64) (int64, error) {
+					return testDefaultQuota, nil // already at limit
+				}
+			},
+			wantErr: "storage quota exceeded",
+		},
+		{
+			name: "quota_user_override_exceeded",
+			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "big.txt", FileSize: 1024, TargetFolderID: 0},
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
+				smallQuota := int64(100)
+				ur.getQuotaFn = func(ctx context.Context, userID int64) (*int64, error) {
+					return &smallQuota, nil
+				}
+				pr.calculateUserStorageUsageFn = func(ctx context.Context, userID int64) (int64, error) {
+					return 50, nil // 50/100 used, adding 1024 exceeds
+				}
+			},
+			wantErr: "storage quota exceeded",
+		},
+		{
+			name: "quota_unlimited",
+			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "big.txt", FileSize: 1024, TargetFolderID: 0},
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
+				unlimited := int64(0)
+				ur.getQuotaFn = func(ctx context.Context, userID int64) (*int64, error) {
+					return &unlimited, nil
+				}
+				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
+					return nil, errors.New("not found")
+				}
+				tmpDir := t.TempDir()
+				st.tempChunkDirFn = func(uploadID string) string {
+					return filepath.Join(tmpDir, "chunks", uploadID)
+				}
+			},
+			wantInstant: false,
 		},
 		{
 			name: "instant_upload_success",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "test.txt", FileSize: 0, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
 				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
 					return &model.PhysicalFile{ID: 10, MD5: md5, Size: 0}, nil
 				}
@@ -55,7 +99,7 @@ func TestUploadService_InitUpload(t *testing.T) {
 		{
 			name: "instant_upload_create_error",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "test.txt", FileSize: 0, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
 				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
 					return &model.PhysicalFile{ID: 10, MD5: md5}, nil
 				}
@@ -68,7 +112,7 @@ func TestUploadService_InitUpload(t *testing.T) {
 		{
 			name: "instant_upload_ref_increment_error",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "test.txt", FileSize: 0, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
 				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
 					return &model.PhysicalFile{ID: 10, MD5: md5}, nil
 				}
@@ -84,7 +128,7 @@ func TestUploadService_InitUpload(t *testing.T) {
 		{
 			name: "chunked_upload_no_existing_chunks",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "test.txt", FileSize: 1024, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
 				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
 					return nil, errors.New("not found")
 				}
@@ -98,7 +142,7 @@ func TestUploadService_InitUpload(t *testing.T) {
 		{
 			name: "chunked_upload_existing_chunks",
 			req:  InitUploadRequest{MD5: "d41d8cd98f00b204e9800998ecf8427e", FileName: "test.txt", FileSize: 1024, TargetFolderID: 0},
-			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, st *mockStorage) {
+			setup: func(fr *mockFileRepo, pr *mockPhysicalFileRepo, ur *mockUserRepo, st *mockStorage) {
 				pr.findByMD5Fn = func(ctx context.Context, md5 string) (*model.PhysicalFile, error) {
 					return nil, errors.New("not found")
 				}
@@ -120,10 +164,11 @@ func TestUploadService_InitUpload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fr := &mockFileRepo{}
 			pr := &mockPhysicalFileRepo{}
+			ur := &mockUserRepo{}
 			st := &mockStorage{}
-			tt.setup(fr, pr, st)
+			tt.setup(fr, pr, ur, st)
 
-			svc := NewUploadService(fr, pr, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024)
+			svc := NewUploadService(fr, pr, ur, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota)
 			resp, err := svc.InitUpload(context.Background(), tt.userID, tt.req)
 
 			if tt.wantErr != "" {
@@ -173,7 +218,7 @@ func TestUploadService_SaveChunk(t *testing.T) {
 				},
 			}
 
-			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024)
+			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota)
 			err := svc.SaveChunk(context.Background(), tt.uploadID, tt.chunkIndex, strings.NewReader("test data"))
 
 			if tt.wantErr != "" {
@@ -218,7 +263,7 @@ func TestUploadService_CancelUpload(t *testing.T) {
 				},
 			}
 
-			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024)
+			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota)
 			err := svc.CancelUpload(context.Background(), tt.uploadID)
 
 			if tt.wantErr != "" {
@@ -366,7 +411,7 @@ func TestUploadService_CompleteUpload(t *testing.T) {
 				}
 			}
 
-			svc := NewUploadService(fr, pr, &mockUserRepo{}, st, img, chunkSize)
+			svc := NewUploadService(fr, pr, &mockUserRepo{}, st, img, chunkSize, testDefaultQuota)
 
 			// Use the correct uploadID for all tests except the invalid one
 			uid := uploadID
