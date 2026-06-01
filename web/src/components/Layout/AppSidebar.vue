@@ -41,10 +41,20 @@
         v-if="authStore.isAdmin"
         to="/admin/users"
         class="nav-item"
-        :class="{ active: route.path.startsWith('/admin') }"
+        :class="{ active: route.path === '/admin/users' }"
       >
         <el-icon><User /></el-icon>
         <span>用户管理</span>
+      </router-link>
+
+      <router-link
+        v-if="authStore.isAdmin"
+        to="/admin/audit"
+        class="nav-item"
+        :class="{ active: route.path === '/admin/audit' }"
+      >
+        <el-icon><List /></el-icon>
+        <span>审计日志</span>
       </router-link>
     </nav>
 
@@ -63,7 +73,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { storageAPI } from '@/utils/api'
-import { Folder, Delete, Document, User, Share } from '@element-plus/icons-vue'
+import { Folder, Delete, Document, User, Share, List } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()

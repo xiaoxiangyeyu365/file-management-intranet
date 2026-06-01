@@ -6,6 +6,7 @@ import TrashView from '@/views/TrashView.vue'
 import ClipboardView from '@/views/ClipboardView.vue'
 import RegisterView from '@/views/RegisterView.vue'
 import AdminUsersView from '@/views/AdminUsersView.vue'
+import AdminAuditView from '@/views/AdminAuditView.vue'
 import ForcePasswordChangeView from '@/views/ForcePasswordChangeView.vue'
 
 const routes = [
@@ -49,6 +50,12 @@ const routes = [
     path: '/admin/users',
     name: 'AdminUsers',
     component: AdminUsersView,
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/admin/audit',
+    name: 'AdminAudit',
+    component: AdminAuditView,
     meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
