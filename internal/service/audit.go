@@ -118,12 +118,16 @@ func (s *AuditService) consume() {
 				flush()
 				return
 			}
+			var tid *int64
+			if entry.TargetID != 0 {
+				tid = &entry.TargetID
+			}
 			batch = append(batch, model.AuditLog{
 				UserID:     entry.UserID,
 				Username:   entry.Username,
 				Action:     entry.Action,
 				TargetType: entry.TargetType,
-				TargetID:   &entry.TargetID,
+				TargetID:   tid,
 				TargetName: entry.TargetName,
 				Detail:     entry.Detail,
 				IPAddress:  entry.IPAddress,

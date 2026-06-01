@@ -4,6 +4,7 @@ package handler
 import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/response"
+	"context"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,7 +50,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.authService.Login(c.Request.Context(), req.Username, req.Password)
+	// Inject client IP for audit logging (public route, no JWT middleware)
+	ctx := context.WithValue(c.Request.Context(), "clientIP", c.ClientIP())
+	c.Request = c.Request.WithContext(ctx)
+
+	resp, err := h.authService.Login(ctx, req.Username, req.Password)
 	if err != nil {
 		if err == service.ErrAccountPending {
 			response.Error(c, 401, "账号待审批，请联系管理员")
