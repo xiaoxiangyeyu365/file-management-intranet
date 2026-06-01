@@ -35,6 +35,7 @@ func NewWebDAVHandler(fileService *service.FileService, uploadService *service.U
 	return &webdav.Handler{
 		FileSystem: fs,
 		LockSystem: webdav.NewMemLS(),
+		Prefix:     "/dav",
 	}
 }
 

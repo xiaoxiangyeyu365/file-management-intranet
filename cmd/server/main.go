@@ -183,12 +183,16 @@ func main() {
 		admin.GET("/audit-logs", adminHandler.ListAuditLogs)
 	}
 
-	// WebDAV routes
+	// WebDAV routes — register all WebDAV methods explicitly
+	// (r.Any only covers standard HTTP methods, not PROPFIND/MKCOL/MOVE/COPY/LOCK/UNLOCK)
 	davHandler := handler.NewWebDAVHandler(fileService, uploadService, auditService, storageManager)
 	davAuth := handler.BasicAuthMiddleware(authService, auditService)
-	r.Any("/dav/*path", davAuth, func(c *gin.Context) {
-		davHandler.ServeHTTP(c.Writer, c.Request)
-	})
+	davServe := func(c *gin.Context) { davHandler.ServeHTTP(c.Writer, c.Request) }
+	webdavMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+		"PROPFIND", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK"}
+	for _, method := range webdavMethods {
+		r.Handle(method, "/dav/*path", davAuth, davServe)
+	}
 
 	// Serve static files (must be after API routes)
 	r.Static("/assets", "./static/assets")
