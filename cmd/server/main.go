@@ -60,7 +60,7 @@ func main() {
 	clipboardHandler := handler.NewClipboardHandler(clipboardService)
 
 	// Initialize admin service and handler
-	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter, auditService)
+	adminService := service.NewAdminService(userRepo, fileRepo, physicalRepo, clipboardRepo, fileService, cryptoAdapter, auditService, auditRepo)
 	adminHandler := handler.NewAdminHandler(adminService)
 	shareHandler := handler.NewShareHandler(shareService, fileService)
 	storageHandler := handler.NewStorageHandler(physicalRepo, userRepo)
@@ -174,6 +174,7 @@ func main() {
 		admin.PUT("/users/:id/password", adminHandler.ResetPassword)
 		admin.PUT("/users/:id/quota", adminHandler.UpdateUserQuota)
 		admin.DELETE("/users/:id", adminHandler.DeleteUser)
+		admin.GET("/audit-logs", adminHandler.ListAuditLogs)
 	}
 
 	// Serve static files (must be after API routes)

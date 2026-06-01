@@ -6,6 +6,7 @@ import (
 	"cloudbox/internal/util/response"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -174,4 +175,45 @@ func (h *AdminHandler) UpdateUserQuota(c *gin.Context) {
 	}
 
 	response.Success(c, nil)
+}
+
+func (h *AdminHandler) ListAuditLogs(c *gin.Context) {
+	action := c.Query("action")
+	targetType := c.Query("targetType")
+	keyword := c.Query("keyword")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
+
+	var userID int64
+	if v := c.Query("userId"); v != "" {
+		userID, _ = strconv.ParseInt(v, 10, 64)
+	}
+
+	var startDate, endDate *time.Time
+	if v := c.Query("startDate"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			startDate = &t
+		}
+	}
+	if v := c.Query("endDate"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			endDate = &t
+		}
+	}
+
+	logs, total, err := h.adminService.ListAuditLogs(c.Request.Context(), action, userID, targetType, keyword, startDate, endDate, page, pageSize)
+	if err != nil {
+		response.InternalError(c, "failed to query audit logs")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"logs":     logs,
+			"total":    total,
+			"page":     page,
+			"pageSize": pageSize,
+		},
+	})
 }

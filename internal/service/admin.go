@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
 var (
@@ -24,6 +25,7 @@ type AdminService struct {
 	fileService   *FileService
 	hasher        PasswordHasher
 	audit         AuditRecorder
+	auditRepo     *repository.AuditRepository
 }
 
 func NewAdminService(
@@ -34,6 +36,7 @@ func NewAdminService(
 	fileService *FileService,
 	hasher PasswordHasher,
 	audit AuditRecorder,
+	auditRepo *repository.AuditRepository,
 ) *AdminService {
 	return &AdminService{
 		userRepo:      userRepo,
@@ -43,6 +46,7 @@ func NewAdminService(
 		fileService:   fileService,
 		hasher:        hasher,
 		audit:         audit,
+		auditRepo:     auditRepo,
 	}
 }
 
@@ -257,4 +261,8 @@ func (s *AdminService) SetUserQuota(ctx context.Context, userID int64, quota *in
 
 func (s *AdminService) GetAllUserStorageUsage(ctx context.Context) (map[int64]int64, error) {
 	return s.physicalRepo.CalculateAllUserStorageUsage(ctx)
+}
+
+func (s *AdminService) ListAuditLogs(ctx context.Context, action string, userID int64, targetType string, keyword string, startDate, endDate *time.Time, page, pageSize int) ([]model.AuditLog, int64, error) {
+	return s.auditRepo.FindWithFilter(ctx, action, userID, targetType, keyword, startDate, endDate, page, pageSize)
 }
