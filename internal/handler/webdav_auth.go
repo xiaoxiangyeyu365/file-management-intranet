@@ -4,6 +4,7 @@ import (
 	"cloudbox/internal/service"
 	"context"
 	"encoding/base64"
+	"log"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -22,11 +23,23 @@ func BasicAuthMiddleware(authService *service.AuthService, audit service.AuditRe
 		}
 
 		authHeader := c.GetHeader("Authorization")
+		authPreview := authHeader
+		if len(authPreview) > 30 {
+			authPreview = authPreview[:30] + "..."
+		}
+
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Basic ") {
+			log.Printf("[WebDAV] %s %s -> 401 (no auth) UA=%q",
+				c.Request.Method, c.Request.URL.Path,
+				c.GetHeader("User-Agent"))
 			c.Header("WWW-Authenticate", `Basic realm="CloudBox WebDAV"`)
 			c.AbortWithStatus(401)
 			return
 		}
+
+		log.Printf("[WebDAV] %s %s -> auth=%q UA=%q",
+			c.Request.Method, c.Request.URL.Path,
+			authPreview, c.GetHeader("User-Agent"))
 
 		decoded, err := base64.StdEncoding.DecodeString(authHeader[6:])
 		if err != nil {
@@ -48,11 +61,16 @@ func BasicAuthMiddleware(authService *service.AuthService, audit service.AuditRe
 
 		user, err := authService.ValidateCredentials(ctx, username, password)
 		if err != nil {
+			log.Printf("[WebDAV] %s %s -> 401 (bad creds) user=%q",
+				c.Request.Method, c.Request.URL.Path, username)
 			audit.Record(ctx, "user.login_failed", "user", 0, username, "")
 			c.Header("WWW-Authenticate", `Basic realm="CloudBox WebDAV"`)
 			c.AbortWithStatus(401)
 			return
 		}
+
+		log.Printf("[WebDAV] %s %s -> OK user=%q",
+			c.Request.Method, c.Request.URL.Path, user.Username)
 
 		c.Set("userID", user.ID)
 		c.Set("username", user.Username)

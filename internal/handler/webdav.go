@@ -31,6 +31,7 @@ type cloudFS struct {
 	audit         service.AuditRecorder
 	storage       *storage.StorageManager
 	quotaGetter   func(ctx context.Context, userID int64) (QuotaInfo, error)
+	deadProps     sync.Map // path (string) → dead properties (map[xml.Name]webdav.Property)
 }
 
 // NewWebDAVHandler returns an http.Handler that serves WebDAV requests.
@@ -290,6 +291,7 @@ func (fs *cloudFS) OpenFile(ctx context.Context, name string, flag int, perm os.
 			ctx:      ctx,
 			userID:   userID,
 			parentID: 0,
+			path:     name,
 		}, nil
 	}
 
@@ -300,6 +302,7 @@ func (fs *cloudFS) OpenFile(ctx context.Context, name string, flag int, perm os.
 			userID:   userID,
 			parentID: file.ID,
 			file:     file,
+			path:     name,
 		}, nil
 	}
 
@@ -320,6 +323,7 @@ func (fs *cloudFS) OpenFile(ctx context.Context, name string, flag int, perm os.
 		fs:       fs,
 		ctx:      ctx,
 		userID:   userID,
+		path:     name,
 	}, nil
 }
 
@@ -352,6 +356,7 @@ type cloudFile struct {
 	fs       *cloudFS
 	ctx      context.Context
 	userID   int64
+	path     string // WebDAV path for dead property storage
 }
 
 func (f *cloudFile) Readdir(count int) ([]os.FileInfo, error) {
@@ -368,40 +373,18 @@ func (f *cloudFile) Write(p []byte) (int, error) {
 
 // DeadProps implements webdav.DeadPropsHolder.
 func (f *cloudFile) DeadProps() (map[xml.Name]webdav.Property, error) {
-	if f.fs == nil || f.fs.quotaGetter == nil {
-		return nil, nil
-	}
-	info, err := f.fs.quotaGetter(f.ctx, f.userID)
-	if err != nil {
-		return nil, nil
-	}
-	props := map[xml.Name]webdav.Property{}
-	quotaName := xml.Name{Space: "DAV:", Local: "quota-available-bytes"}
-	usedName := xml.Name{Space: "DAV:", Local: "quota-used-bytes"}
-	if info.QuotaBytes > 0 {
-		avail := info.QuotaBytes - info.UsedBytes
-		if avail < 0 {
-			avail = 0
+	props := f.fs.baseDeadProps(f.ctx, f.userID)
+	stored, _ := f.fs.deadProps.Load(f.path)
+	if stored != nil {
+		for k, v := range stored.(map[xml.Name]webdav.Property) {
+			props[k] = v
 		}
-		props[quotaName] = webdav.Property{
-			XMLName:  quotaName,
-			InnerXML: []byte(strconv.FormatInt(avail, 10)),
-		}
-	} else {
-		props[quotaName] = webdav.Property{
-			XMLName:  quotaName,
-			InnerXML: []byte(strconv.FormatInt(1<<50, 10)),
-		}
-	}
-	props[usedName] = webdav.Property{
-		XMLName:  usedName,
-		InnerXML: []byte(strconv.FormatInt(info.UsedBytes, 10)),
 	}
 	return props, nil
 }
 
 func (f *cloudFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
-	return nil, webdav.ErrNotImplemented
+	return f.fs.applyPatch(f.path, patches)
 }
 
 // cloudDir implements webdav.File for directory listings.
@@ -411,6 +394,7 @@ type cloudDir struct {
 	userID   int64
 	parentID int64
 	file     *model.File
+	path     string // WebDAV path for dead property storage
 }
 
 func (d *cloudDir) Read(p []byte) (int, error)                          { return 0, fmt.Errorf("is a directory") }
@@ -442,47 +426,21 @@ func (d *cloudDir) Stat() (os.FileInfo, error) {
 	return &virtualRootInfo{userID: d.userID}, nil
 }
 
-// DeadProps implements webdav.DeadPropsHolder — returns quota properties for Windows Explorer.
+// DeadProps implements webdav.DeadPropsHolder — returns quota + stored properties.
 func (d *cloudDir) DeadProps() (map[xml.Name]webdav.Property, error) {
-	if d.fs.quotaGetter == nil {
-		return nil, nil
-	}
-
-	info, err := d.fs.quotaGetter(d.ctx, d.userID)
-	if err != nil {
-		return nil, nil
-	}
-
-	props := map[xml.Name]webdav.Property{}
-	quotaName := xml.Name{Space: "DAV:", Local: "quota-available-bytes"}
-	usedName := xml.Name{Space: "DAV:", Local: "quota-used-bytes"}
-
-	if info.QuotaBytes > 0 {
-		avail := info.QuotaBytes - info.UsedBytes
-		if avail < 0 {
-			avail = 0
+	props := d.fs.baseDeadProps(d.ctx, d.userID)
+	stored, _ := d.fs.deadProps.Load(d.path)
+	if stored != nil {
+		for k, v := range stored.(map[xml.Name]webdav.Property) {
+			props[k] = v
 		}
-		props[quotaName] = webdav.Property{
-			XMLName:  quotaName,
-			InnerXML: []byte(strconv.FormatInt(avail, 10)),
-		}
-	} else {
-		// Unlimited quota — return a large value so Windows doesn't fall back to C: drive
-		props[quotaName] = webdav.Property{
-			XMLName:  quotaName,
-			InnerXML: []byte(strconv.FormatInt(1<<50, 10)), // ~1 PB
-		}
-	}
-	props[usedName] = webdav.Property{
-		XMLName:  usedName,
-		InnerXML: []byte(strconv.FormatInt(info.UsedBytes, 10)),
 	}
 	return props, nil
 }
 
-// Patch implements webdav.DeadPropsHolder.
+// Patch implements webdav.DeadPropsHolder — stores property changes.
 func (d *cloudDir) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
-	return nil, webdav.ErrNotImplemented
+	return d.fs.applyPatch(d.path, patches)
 }
 
 // cloudWriteFile buffers a PUT body and flushes to UploadFile on Close.
@@ -564,6 +522,65 @@ func (fs *cloudFS) Copy(ctx context.Context, src, dst string, recursive bool) (i
 	}
 
 	return fs.copyFile(ctx, userID, srcFile, dstParent.ID, dstBaseName)
+}
+
+// baseDeadProps returns quota properties for a WebDAV resource.
+func (fs *cloudFS) baseDeadProps(ctx context.Context, userID int64) map[xml.Name]webdav.Property {
+	props := map[xml.Name]webdav.Property{}
+	quotaName := xml.Name{Space: "DAV:", Local: "quota-available-bytes"}
+	usedName := xml.Name{Space: "DAV:", Local: "quota-used-bytes"}
+
+	if fs.quotaGetter != nil {
+		info, err := fs.quotaGetter(ctx, userID)
+		if err == nil {
+			if info.QuotaBytes > 0 {
+				avail := info.QuotaBytes - info.UsedBytes
+				if avail < 0 {
+					avail = 0
+				}
+				props[quotaName] = webdav.Property{
+					XMLName:  quotaName,
+					InnerXML: []byte(strconv.FormatInt(avail, 10)),
+				}
+			} else {
+				props[quotaName] = webdav.Property{
+					XMLName:  quotaName,
+					InnerXML: []byte(strconv.FormatInt(1<<50, 10)),
+				}
+			}
+			props[usedName] = webdav.Property{
+				XMLName:  usedName,
+				InnerXML: []byte(strconv.FormatInt(info.UsedBytes, 10)),
+			}
+		}
+	}
+	return props
+}
+
+// applyPatch applies PROPPATCH changes and returns success propstats.
+func (fs *cloudFS) applyPatch(path string, patches []webdav.Proppatch) ([]webdav.Propstat, error) {
+	existing, _ := fs.deadProps.Load(path)
+	props := make(map[xml.Name]webdav.Property)
+	if existing != nil {
+		for k, v := range existing.(map[xml.Name]webdav.Property) {
+			props[k] = v
+		}
+	}
+
+	var stats []webdav.Propstat
+	for _, patch := range patches {
+		var okProps []webdav.Property
+		for _, p := range patch.Props {
+			props[p.XMLName] = p
+			okProps = append(okProps, webdav.Property{XMLName: p.XMLName})
+		}
+		stats = append(stats, webdav.Propstat{
+			Status: http.StatusOK,
+			Props:  okProps,
+		})
+	}
+	fs.deadProps.Store(path, props)
+	return stats, nil
 }
 
 func (fs *cloudFS) copyFile(ctx context.Context, userID int64, src *model.File, dstParentID int64, dstName string) (int, error) {

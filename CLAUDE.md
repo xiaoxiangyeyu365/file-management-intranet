@@ -4,127 +4,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CloudBox is an internal network cloud storage application for campus network environments. It replaces Windows file sharing (SMB) limitations by providing a web-based file manager with upload/download, folder management, and a CLI tool.
+CloudBox is an internal network cloud storage application for campus network environments. Go/Gin backend + Vue 3/Element Plus frontend, supporting WebDAV, audit logging, quota management, file sharing, and clipboard.
 
-**Current Phase:** Design complete, implementation pending (Phase 1: Go backend)
+## Build & Run
 
-**Design Spec:** `docs/superpowers/specs/2025-05-13-cloudbox-design.md`
+```bash
+# Build and run (port from configs/config.yaml, default 80)
+make run                    # go run ./cmd/server
+
+# Full build (frontend + backend)
+make build                  # builds web/ then go build
+
+# Frontend only
+cd web && npm run build
+
+# Backend only
+go build -o cloudbox.exe ./cmd/server
+
+# Run tests
+go test ./internal/service/ -v
+go test ./internal/handler/ -v
+```
 
 ## Architecture
 
-### Three-Phase Implementation
-
-1. **Phase 1: Go Backend** - REST API server with SQLite database
-2. **Phase 2: Vue Frontend** - Web UI served by embedded static files
-3. **Phase 3: CLI Tool** - Command-line interface for scripting
-
-### Key Design Decisions
+**Layers:** Gin routes → handler → service → repository → database (MySQL by default)
 
 **File Storage Model:**
-- `physical_files` table: Stores actual file data, referenced by MD5 for deduplication (instant upload)
-- `files` table: User-facing records with owner_id for multi-user isolation, parent_id for directory tree
-- Reference counting (`ref_count`) is on `physical_files`, not on `files` records
+- `physical_files` table: actual file data keyed by MD5, with `ref_count` for deduplication
+- `files` table: virtual file tree with `owner_id` isolation, `parent_id` hierarchy, `physical_ref` (NOT `physical_id` — this is the GORM column name)
+- Soft delete via `deleted_at`; reference counting is on `physical_files.ref_count`
 
-**Upload Flow:**
-- `uploadID = MD5(fileContent) + "_" + userID` for temp directory naming
-- Chunk size: 5MB, concurrent uploads: max 3
-- Frontend calculates MD5 via Web Worker to enable instant upload check
+**Upload Flow:** MD5 calculated on frontend → `POST /api/upload/init` (instant upload check) → chunked upload → `POST /api/upload/:id/complete` (merge chunks, create records, thumbnail)
 
-**Security:**
-- JWT authentication on all API routes except login
-- User isolation via owner_id filtering on every file operation
-- Sensitive operations (delete, download) require frontend confirmation dialog
+**Key Go Dependencies:** Gin, GORM (MySQL+SQLite), `golang.org/x/net/webdav`, JWT, Swaggo
 
-**Database:**
-- SQLite single-file database at `./data/cloudbox.db`
-- Repository pattern with interface abstraction for future MySQL migration
+**Service Interfaces:** Defined in `internal/service/interfaces.go` — `FileRepository`, `PhysicalFileRepository`, `UserRepository`, `Storage`, `AuditRecorder`, etc. Mock structs are in `internal/service/mock_test.go` with function-pointer fields (nil panics with method name).
 
-## Project Structure (Target)
+## WebDAV (`/dav/`)
 
-```
-cloudbox/
-├── cmd/server/main.go          # Backend entry point
-├── internal/
-│   ├── config/                 # Configuration loading
-│   ├── handler/                # HTTP handlers (auth, files, folders, upload, trash)
-│   ├── service/                # Business logic layer
-│   ├── repository/             # Data access layer
-│   ├── model/                  # Data models
-│   └── util/                   # Crypto, storage, response utilities
-├── web/                        # Vue frontend source
-├── configs/config.yaml         # Configuration template
-├── embed.go                    # Static file embedding (//go:embed web/dist)
-└── Makefile                    # Build commands
-```
+Registered via explicit `r.Handle()` for each method (PROPFIND, MKCOL, MOVE, COPY, LOCK, UNLOCK, PROPPATCH) — `r.Any()` only covers standard HTTP methods.
 
-## Build Commands (Planned)
+**Critical gotchas:**
+- `webdav.Handler` needs `Prefix: "/dav"` to strip the URL prefix before calling FileSystem methods
+- CORS middleware skips `/dav` paths so the handler can respond with WebDAV headers (`Ms-Author-Via: DAV`, `Dav: 1, 2`)
+- Windows WebClient sends unauthenticated OPTIONS to root path `/` for service discovery — CORS response must include `Ms-Author-Via: DAV`
+- BasicAuth middleware skips OPTIONS (Windows may not retry with credentials)
+- Route `/dav` (no trailing slash) must be registered separately alongside `/dav/*path`
+- DeadPropsHolder must actually store PROPPATCH-ed properties and return them in subsequent PROPFIND; returning ErrNotImplemented causes Windows to DELETE after upload
+- `permissiveLockSystem` implemented because Windows sends LOCK but doesn't include lock tokens in subsequent PUT requests
+- Column in `files` table is `physical_ref`, not `physical_id` — raw SQL JOINs must use the correct name
 
-```bash
-# Full build (frontend + backend)
-make build
+## Database
 
-# Backend only
-make build-server
+MySQL by default (configs/config.yaml). Tables: `users`, `files`, `physical_files`, `clipboard_records`, `file_shares`, `audit_logs`.
 
-# Frontend only
-make build-frontend
+Schema managed in `internal/repository/db.go` — each table has a `create*Table()` function with dual SQLite/MySQL DDL. Auto-migration checks if table exists before creating. Column additions (like `disk_quota`) use raw ALTER TABLE with error suppression for "duplicate column".
 
-# Run
-./cloudbox.exe
-```
+**Config:** `configs/config.yaml` (MySQL default) or `configs/config.mysql.yaml`
 
-## Database Schema
+## Audit Logging
 
-**users**: id, username, password_hash, role, created_at
+Async: `AuditService` with buffered channel (cap=256), batch size 50, 500ms flush. `Record()` extracts userID/username/clientIP from context. Graceful shutdown via `Shutdown()` — HTTP server stops first, then audit flush.
 
-**physical_files**: id, storage_path, md5 (UNIQUE), size, mime_type, ref_count, thumbnail_path, created_at
+## Git Conventions
 
-**files**: id, name, physical_id (FK), parent_id (FK), owner_id (FK), is_folder, deleted_at, created_at, updated_at
-
-Indexes: `(owner_id, parent_id, deleted_at)`, `(owner_id, deleted_at)`, `(parent_id, name, deleted_at)`, `(physical_id)`, `(md5 on physical_files)`
-
-## API Routes
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/login` | Login |
-| POST | `/api/auth/password` | Change password |
-| GET | `/api/files?folderId={id}` | List files |
-| GET | `/api/files/lookup?parentId={id}&name={name}` | Lookup by name |
-| PUT | `/api/files/{id}` | Rename |
-| DELETE | `/api/files/{id}` | Move to trash |
-| PATCH | `/api/files/move` | Move files |
-| GET | `/api/files/{id}/download` | Download file |
-| POST | `/api/folders` | Create folder |
-| GET | `/api/folders/{id}/download` | Download folder as ZIP |
-| POST | `/api/upload/init` | Init upload (instant upload check) |
-| PUT | `/api/upload/{uploadID}/chunk/{index}` | Upload chunk |
-| GET | `/api/upload/{uploadID}/progress` | Upload progress |
-| POST | `/api/upload/{uploadID}/complete` | Complete upload |
-| GET | `/api/trash` | List trash |
-| POST | `/api/trash/{id}/restore` | Restore |
-| DELETE | `/api/trash/{id}` | Permanent delete |
-
-## CLI Tool (Phase 3)
-
-```bash
-cloudbox login       # Login
-cloudbox ls [path]   # List files
-cloudbox upload <local> [remote]  # Upload
-cloudbox download <remote> [local] # Download
-cloudbox rm <path>   # Delete (to trash)
-cloudbox mkdir <path> # Create folder
-```
-
-Config stored at `~/.cloudbox/config.json` with `0600` permissions.
-
-## Configuration
-
-All paths are relative to executable location, converted to absolute paths at startup:
-- Database: `./data/cloudbox.db`
-- File storage: `./data/files/`
-- Temp chunks: `./data/temp/`
-- Thumbnails: `./data/thumbnails/`
-- Logs: `./data/logs/cloudbox.log`
-
-JWT secret from `JWT_SECRET` env var or generated randomly (warns in production).
+- Use `git add` with specific files, not `git add -A`
+- Commit messages in Chinese or English, prefixed with `feat:`, `fix:`, `test:`, `docs:`
+- Co-authored-by line on commits

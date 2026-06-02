@@ -211,7 +211,7 @@ func main() {
 	davAuth := handler.BasicAuthMiddleware(authService, auditService)
 	davServe := func(c *gin.Context) { davHandler.ServeHTTP(c.Writer, c.Request) }
 	webdavMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
-		"PROPFIND", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK"}
+		"PROPFIND", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK", "PROPPATCH"}
 	for _, method := range webdavMethods {
 		r.Handle(method, "/dav/*path", davAuth, davServe)
 		r.Handle(method, "/dav", davAuth, davServe) // Windows sends requests without trailing slash
