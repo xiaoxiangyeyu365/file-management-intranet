@@ -209,10 +209,7 @@ func main() {
 			return handler.QuotaInfo{UsedBytes: used, QuotaBytes: quota}, nil
 		})
 	davAuth := handler.BasicAuthMiddleware(authService, auditService)
-	davServe := func(c *gin.Context) {
-		log.Printf("[WebDAV-Handler] %s %s | Auth=%q", c.Request.Method, c.Request.URL.Path, c.GetHeader("Authorization")[:min(30, len(c.GetHeader("Authorization")))])
-		davHandler.ServeHTTP(c.Writer, c.Request)
-	}
+	davServe := func(c *gin.Context) { davHandler.ServeHTTP(c.Writer, c.Request) }
 	webdavMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
 		"PROPFIND", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK"}
 	for _, method := range webdavMethods {

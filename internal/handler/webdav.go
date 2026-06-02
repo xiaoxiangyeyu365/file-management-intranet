@@ -317,6 +317,9 @@ func (fs *cloudFS) OpenFile(ctx context.Context, name string, flag int, perm os.
 	return &cloudFile{
 		File:     physicalFile,
 		fileInfo: &cloudFileInfo{file: file},
+		fs:       fs,
+		ctx:      ctx,
+		userID:   userID,
 	}, nil
 }
 
@@ -346,6 +349,9 @@ func (fs *cloudFS) openForWrite(ctx context.Context, userID int64, name string) 
 type cloudFile struct {
 	*os.File
 	fileInfo os.FileInfo
+	fs       *cloudFS
+	ctx      context.Context
+	userID   int64
 }
 
 func (f *cloudFile) Readdir(count int) ([]os.FileInfo, error) {
@@ -358,6 +364,44 @@ func (f *cloudFile) Stat() (os.FileInfo, error) {
 
 func (f *cloudFile) Write(p []byte) (int, error) {
 	return 0, os.ErrPermission
+}
+
+// DeadProps implements webdav.DeadPropsHolder.
+func (f *cloudFile) DeadProps() (map[xml.Name]webdav.Property, error) {
+	if f.fs == nil || f.fs.quotaGetter == nil {
+		return nil, nil
+	}
+	info, err := f.fs.quotaGetter(f.ctx, f.userID)
+	if err != nil {
+		return nil, nil
+	}
+	props := map[xml.Name]webdav.Property{}
+	quotaName := xml.Name{Space: "DAV:", Local: "quota-available-bytes"}
+	usedName := xml.Name{Space: "DAV:", Local: "quota-used-bytes"}
+	if info.QuotaBytes > 0 {
+		avail := info.QuotaBytes - info.UsedBytes
+		if avail < 0 {
+			avail = 0
+		}
+		props[quotaName] = webdav.Property{
+			XMLName:  quotaName,
+			InnerXML: []byte(strconv.FormatInt(avail, 10)),
+		}
+	} else {
+		props[quotaName] = webdav.Property{
+			XMLName:  quotaName,
+			InnerXML: []byte(strconv.FormatInt(1<<50, 10)),
+		}
+	}
+	props[usedName] = webdav.Property{
+		XMLName:  usedName,
+		InnerXML: []byte(strconv.FormatInt(info.UsedBytes, 10)),
+	}
+	return props, nil
+}
+
+func (f *cloudFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
+	return nil, webdav.ErrNotImplemented
 }
 
 // cloudDir implements webdav.File for directory listings.
