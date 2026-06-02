@@ -90,6 +90,10 @@ func main() {
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
+			// Windows WebClient sends unauthenticated OPTIONS to root path to
+			// discover WebDAV capabilities before trying the mapped path.
+			c.Header("Ms-Author-Via", "DAV")
+			c.Header("Dav", "1, 2")
 			c.AbortWithStatus(204)
 			return
 		}
@@ -192,13 +196,28 @@ func main() {
 
 	// WebDAV routes — register all WebDAV methods explicitly
 	// (r.Any only covers standard HTTP methods, not PROPFIND/MKCOL/MOVE/COPY/LOCK/UNLOCK)
-	davHandler := handler.NewWebDAVHandler(fileService, uploadService, auditService, storageManager)
+	davHandler := handler.NewWebDAVHandler(fileService, uploadService, auditService, storageManager,
+		func(ctx context.Context, userID int64) (handler.QuotaInfo, error) {
+			used, err := physicalRepo.CalculateUserStorageUsage(ctx, userID)
+			if err != nil {
+				return handler.QuotaInfo{UsedBytes: 0, QuotaBytes: 0}, nil
+			}
+			quota := int64(0)
+			if q, err := userRepo.GetQuota(ctx, userID); err == nil && q != nil {
+				quota = *q
+			}
+			return handler.QuotaInfo{UsedBytes: used, QuotaBytes: quota}, nil
+		})
 	davAuth := handler.BasicAuthMiddleware(authService, auditService)
-	davServe := func(c *gin.Context) { davHandler.ServeHTTP(c.Writer, c.Request) }
+	davServe := func(c *gin.Context) {
+		log.Printf("[WebDAV-Handler] %s %s | Auth=%q", c.Request.Method, c.Request.URL.Path, c.GetHeader("Authorization")[:min(30, len(c.GetHeader("Authorization")))])
+		davHandler.ServeHTTP(c.Writer, c.Request)
+	}
 	webdavMethods := []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
 		"PROPFIND", "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK"}
 	for _, method := range webdavMethods {
 		r.Handle(method, "/dav/*path", davAuth, davServe)
+		r.Handle(method, "/dav", davAuth, davServe) // Windows sends requests without trailing slash
 	}
 
 	// Serve static files (must be after API routes)

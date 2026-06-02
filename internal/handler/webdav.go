@@ -5,15 +5,24 @@ import (
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/storage"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/webdav"
 )
+
+// QuotaInfo contains storage usage information for a user.
+type QuotaInfo struct {
+	UsedBytes  int64
+	QuotaBytes int64 // 0 means unlimited
+}
 
 // cloudFS implements webdav.FileSystem backed by CloudBox services.
 type cloudFS struct {
@@ -21,20 +30,24 @@ type cloudFS struct {
 	uploadService *service.UploadService
 	audit         service.AuditRecorder
 	storage       *storage.StorageManager
+	quotaGetter   func(ctx context.Context, userID int64) (QuotaInfo, error)
 }
 
 // NewWebDAVHandler returns an http.Handler that serves WebDAV requests.
-func NewWebDAVHandler(fileService *service.FileService, uploadService *service.UploadService, audit service.AuditRecorder, storage *storage.StorageManager) http.Handler {
+func NewWebDAVHandler(fileService *service.FileService, uploadService *service.UploadService,
+	audit service.AuditRecorder, storage *storage.StorageManager,
+	quotaGetter func(ctx context.Context, userID int64) (QuotaInfo, error)) http.Handler {
 	fs := &cloudFS{
 		fileService:   fileService,
 		uploadService: uploadService,
 		audit:         audit,
 		storage:       storage,
+		quotaGetter:   quotaGetter,
 	}
 
 	return &webdav.Handler{
 		FileSystem: fs,
-		LockSystem: webdav.NewMemLS(),
+		LockSystem: &permissiveLockSystem{},
 		Prefix:     "/dav",
 	}
 }
@@ -385,6 +398,49 @@ func (d *cloudDir) Stat() (os.FileInfo, error) {
 	return &virtualRootInfo{userID: d.userID}, nil
 }
 
+// DeadProps implements webdav.DeadPropsHolder — returns quota properties for Windows Explorer.
+func (d *cloudDir) DeadProps() (map[xml.Name]webdav.Property, error) {
+	if d.fs.quotaGetter == nil {
+		return nil, nil
+	}
+
+	info, err := d.fs.quotaGetter(d.ctx, d.userID)
+	if err != nil {
+		return nil, nil
+	}
+
+	props := map[xml.Name]webdav.Property{}
+	quotaName := xml.Name{Space: "DAV:", Local: "quota-available-bytes"}
+	usedName := xml.Name{Space: "DAV:", Local: "quota-used-bytes"}
+
+	if info.QuotaBytes > 0 {
+		avail := info.QuotaBytes - info.UsedBytes
+		if avail < 0 {
+			avail = 0
+		}
+		props[quotaName] = webdav.Property{
+			XMLName:  quotaName,
+			InnerXML: []byte(strconv.FormatInt(avail, 10)),
+		}
+	} else {
+		// Unlimited quota — return a large value so Windows doesn't fall back to C: drive
+		props[quotaName] = webdav.Property{
+			XMLName:  quotaName,
+			InnerXML: []byte(strconv.FormatInt(1<<50, 10)), // ~1 PB
+		}
+	}
+	props[usedName] = webdav.Property{
+		XMLName:  usedName,
+		InnerXML: []byte(strconv.FormatInt(info.UsedBytes, 10)),
+	}
+	return props, nil
+}
+
+// Patch implements webdav.DeadPropsHolder.
+func (d *cloudDir) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
+	return nil, webdav.ErrNotImplemented
+}
+
 // cloudWriteFile buffers a PUT body and flushes to UploadFile on Close.
 type cloudWriteFile struct {
 	fs       *cloudFS
@@ -508,4 +564,40 @@ func (fs *cloudFS) copyFolder(ctx context.Context, userID int64, src *model.File
 
 	fs.audit.Record(ctx, "folder.copy", "folder", src.ID, src.Name, fmt.Sprintf(`{"dst":"%s"}`, dstName))
 	return http.StatusCreated, nil
+}
+
+// permissiveLockSystem implements webdav.LockSystem — always allows operations without locks.
+// Windows WebClient sends LOCK before PUT but does not include the lock token in the
+// PUT request's If header, causing webdav.Handler to reject with 423 Locked.
+// This implementation satisfies lock requests but never requires lock tokens for writes.
+type permissiveLockSystem struct {
+	mu    sync.Mutex
+	locks map[string]time.Time // token -> expiry
+}
+
+func (ls *permissiveLockSystem) Confirm(now time.Time, name0, name1 string, conditions ...webdav.Condition) (func(), error) {
+	// Always allow — never require lock tokens for writes
+	return func() {}, nil
+}
+
+func (ls *permissiveLockSystem) Create(now time.Time, details webdav.LockDetails) (string, error) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	token := "opaquelocktoken:" + fmt.Sprintf("%x", time.Now().UnixNano())
+	if ls.locks == nil {
+		ls.locks = make(map[string]time.Time)
+	}
+	ls.locks[token] = time.Now().Add(time.Minute)
+	return token, nil
+}
+
+func (ls *permissiveLockSystem) Refresh(now time.Time, token string, duration time.Duration) (webdav.LockDetails, error) {
+	return webdav.LockDetails{}, webdav.ErrNotImplemented
+}
+
+func (ls *permissiveLockSystem) Unlock(now time.Time, token string) error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	delete(ls.locks, token)
+	return nil
 }
