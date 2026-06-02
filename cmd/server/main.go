@@ -73,6 +73,7 @@ func main() {
 
 	// Setup Gin
 	r := gin.Default()
+	r.RedirectTrailingSlash = false // WebDAV clients send trailing slashes; Gin's 307 redirect breaks auth
 
 	// CORS middleware for cross-origin requests
 	r.Use(func(c *gin.Context) {
