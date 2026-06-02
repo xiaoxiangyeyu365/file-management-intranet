@@ -11,6 +11,16 @@ import (
 
 func BasicAuthMiddleware(authService *service.AuthService, audit service.AuditRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Windows WebClient sends unauthenticated OPTIONS to discover WebDAV capabilities.
+		// The webdav.Handler calls Stat() during handleOptions, so we need a stub userID.
+		if c.Request.Method == "OPTIONS" {
+			ctx := context.WithValue(c.Request.Context(), "userID", int64(0))
+			ctx = context.WithValue(ctx, "clientIP", c.ClientIP())
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+			return
+		}
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Basic ") {
 			c.Header("WWW-Authenticate", `Basic realm="CloudBox WebDAV"`)

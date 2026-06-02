@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,6 +78,11 @@ func main() {
 
 	// CORS middleware for cross-origin requests
 	r.Use(func(c *gin.Context) {
+		// Skip CORS preflight for WebDAV paths — webdav.Handler handles its own CORS
+		if strings.HasPrefix(c.Request.URL.Path, "/dav") {
+			c.Next()
+			return
+		}
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Device-Name")
