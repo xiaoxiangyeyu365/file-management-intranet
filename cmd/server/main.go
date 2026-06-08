@@ -112,7 +112,7 @@ func main() {
 				} else {
 					host = host + ":" + strconv.Itoa(cfg.TLS.Port)
 				}
-				c.Redirect(301, fmt.Sprintf("https://%s%s", host, c.Request.RequestURI))
+				c.Redirect(307, fmt.Sprintf("https://%s%s", host, c.Request.RequestURI))
 				c.Abort()
 				return
 			}
