@@ -27,6 +27,7 @@ type Config struct {
 	Share    ShareConfig    `yaml:"share"`
 	Disk     DiskConfig     `yaml:"disk"`
 	Audit    AuditConfig    `yaml:"audit"`
+	TLS      TLSConfig      `yaml:"tls"`
 }
 
 type ServerConfig struct {
@@ -90,6 +91,15 @@ type AuditConfig struct {
 	RetentionDays int `yaml:"retention_days"`
 }
 
+type TLSConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	Port    int      `yaml:"port"`
+	Cert    string   `yaml:"cert"`
+	Key     string   `yaml:"key"`
+	CACert  string   `yaml:"ca_cert"`
+	Hosts   []string `yaml:"hosts"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -144,6 +154,13 @@ func Load() *Config {
 			},
 			Audit: AuditConfig{
 				RetentionDays: 90,
+			},
+			TLS: TLSConfig{
+				Enabled: false,
+				Port:    8443,
+				Cert:    "./data/tls/server.crt",
+				Key:     "./data/tls/server.key",
+				CACert:  "./data/tls/ca.crt",
 			},
 		}
 
@@ -203,6 +220,10 @@ func Load() *Config {
 		mkdirAll(cfg.Storage.Thumbnails)
 		mkdirAll(filepath.Dir(cfg.Database.Path))
 		mkdirAll(filepath.Dir(cfg.Log.File))
+
+		if cfg.TLS.Enabled && cfg.TLS.Port == cfg.Server.Port {
+			log.Fatalf("TLS port (%d) must differ from HTTP port (%d)", cfg.TLS.Port, cfg.Server.Port)
+		}
 	})
 	return cfg
 }
