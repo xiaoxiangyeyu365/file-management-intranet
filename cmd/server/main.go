@@ -105,7 +105,7 @@ func main() {
 	// Redirect /dav paths to HTTPS when TLS is enabled
 	if cfg.TLS.Enabled {
 		r.Use(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/dav") {
+			if strings.HasPrefix(c.Request.URL.Path, "/dav") && c.Request.TLS == nil {
 				host := c.Request.Host
 				if strings.Contains(host, ":") {
 					host = strings.SplitN(host, ":", 2)[0] + ":" + strconv.Itoa(cfg.TLS.Port)
