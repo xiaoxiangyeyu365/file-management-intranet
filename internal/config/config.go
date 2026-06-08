@@ -213,6 +213,9 @@ func Load() *Config {
 		cfg.Storage.Temp = toAbsPath(exeDir, cfg.Storage.Temp)
 		cfg.Storage.Thumbnails = toAbsPath(exeDir, cfg.Storage.Thumbnails)
 		cfg.Log.File = toAbsPath(exeDir, cfg.Log.File)
+		cfg.TLS.Cert = toAbsPath(exeDir, cfg.TLS.Cert)
+		cfg.TLS.Key = toAbsPath(exeDir, cfg.TLS.Key)
+		cfg.TLS.CACert = toAbsPath(exeDir, cfg.TLS.CACert)
 
 		// Create directories
 		mkdirAll(cfg.Storage.Root)
@@ -220,6 +223,7 @@ func Load() *Config {
 		mkdirAll(cfg.Storage.Thumbnails)
 		mkdirAll(filepath.Dir(cfg.Database.Path))
 		mkdirAll(filepath.Dir(cfg.Log.File))
+		mkdirAll(filepath.Dir(cfg.TLS.Cert))
 
 		if cfg.TLS.Enabled && cfg.TLS.Port == cfg.Server.Port {
 			log.Fatalf("TLS port (%d) must differ from HTTP port (%d)", cfg.TLS.Port, cfg.Server.Port)
