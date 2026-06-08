@@ -55,6 +55,19 @@ Registered via explicit `r.Handle()` for each method (PROPFIND, MKCOL, MOVE, COP
 - `permissiveLockSystem` implemented because Windows sends LOCK but doesn't include lock tokens in subsequent PUT requests
 - Column in `files` table is `physical_ref`, not `physical_id` — raw SQL JOINs must use the correct name
 
+## HTTPS / TLS
+
+Self-signed TLS for WebDAV encryption. Config in `configs/config.yaml` under `tls:`.
+
+- `tls.enabled: true` starts a second `http.Server` on `tls.port` (default 8443) with `ListenAndServeTLS`
+- Certificates auto-generated on first start to `data/tls/` (CA key 4096-bit, server key 2048-bit, server cert valid 1 year)
+- Auto-renews if cert expires within 30 days
+- CA cert (`data/tls/ca.crt`) must be imported on client machines for trusted HTTPS
+- HTTP port still active; `/dav` paths on HTTP get 307 redirect to HTTPS
+- Private key files have 0600 permissions
+- Port validation: `tls.port` must differ from `server.port`
+- Import alias `tlspkg` used for `internal/util/tls` to avoid shadowing `crypto/tls`
+
 ## Database
 
 MySQL by default (configs/config.yaml). Tables: `users`, `files`, `physical_files`, `clipboard_records`, `file_shares`, `audit_logs`.
