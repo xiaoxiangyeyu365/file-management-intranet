@@ -42,8 +42,9 @@ func EnsureCertificates(cfg config.TLSConfig) (certFile, keyFile string, err err
 		return "", "", fmt.Errorf("generate CA key: %w", err)
 	}
 
+	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	caTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
+		SerialNumber:          serialNumber,
 		Subject:               pkix.Name{CommonName: "CloudBox CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
@@ -80,19 +81,28 @@ func EnsureCertificates(cfg config.TLSConfig) (certFile, keyFile string, err err
 		return "", "", fmt.Errorf("generate server key: %w", err)
 	}
 
+	sanIPSet := map[string]bool{"127.0.0.1": true, "::1": true}
 	sanIPs := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
+	sanDNSSet := map[string]bool{"localhost": true}
 	var sanDNS []string
 	for _, h := range cfg.Hosts {
 		if ip := net.ParseIP(h); ip != nil {
-			sanIPs = append(sanIPs, ip)
+			if !sanIPSet[h] {
+				sanIPSet[h] = true
+				sanIPs = append(sanIPs, ip)
+			}
 		} else {
-			sanDNS = append(sanDNS, h)
+			if !sanDNSSet[h] {
+				sanDNSSet[h] = true
+				sanDNS = append(sanDNS, h)
+			}
 		}
 	}
 	sanDNS = append(sanDNS, "localhost")
 
+	serverSerial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	serverTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		SerialNumber: serverSerial,
 		Subject:      pkix.Name{CommonName: "CloudBox Server"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().AddDate(1, 0, 0),
@@ -131,25 +141,44 @@ func EnsureCertificates(cfg config.TLSConfig) (certFile, keyFile string, err err
 func existingCertValid(certFile, keyFile string) bool {
 	certPEM, err := os.ReadFile(certFile)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[TLS] Error reading cert file: %v", err)
+		}
 		return false
 	}
 	keyPEM, err := os.ReadFile(keyFile)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[TLS] Error reading key file: %v", err)
+		}
 		return false
 	}
 
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
+		log.Printf("[TLS] Cert file contains invalid PEM")
 		return false
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
+		log.Printf("[TLS] Error parsing cert: %v", err)
 		return false
 	}
 
-	// Check key PEM is parseable
 	keyBlock, _ := pem.Decode(keyPEM)
 	if keyBlock == nil {
+		log.Printf("[TLS] Key file contains invalid PEM")
+		return false
+	}
+
+	// Verify private key matches certificate's public key
+	privKey, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		log.Printf("[TLS] Error parsing key: %v", err)
+		return false
+	}
+	if !cert.PublicKey.(*rsa.PublicKey).Equal(privKey.Public()) {
+		log.Printf("[TLS] Certificate and key do not match, regenerating...")
 		return false
 	}
 

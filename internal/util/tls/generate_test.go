@@ -126,9 +126,18 @@ func TestEnsureCertificates_HostsInSAN(t *testing.T) {
 		t.Fatalf("EnsureCertificates: %v", err)
 	}
 
-	certPEM, _ := os.ReadFile(cfg.Cert)
+	certPEM, err := os.ReadFile(cfg.Cert)
+	if err != nil {
+		t.Fatalf("read cert: %v", err)
+	}
 	block, _ := pem.Decode(certPEM)
-	cert, _ := x509.ParseCertificate(block.Bytes)
+	if block == nil {
+		t.Fatal("failed to decode cert PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse cert: %v", err)
+	}
 
 	// Check IP SAN
 	foundIP := false
