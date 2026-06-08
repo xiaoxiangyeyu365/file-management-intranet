@@ -8,6 +8,7 @@ import (
 	"cloudbox/internal/repository"
 	"cloudbox/internal/service"
 	"cloudbox/internal/util/storage"
+	tlspkg "cloudbox/internal/util/tls"
 	"cloudbox/static"
 	"context"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -99,6 +101,24 @@ func main() {
 		}
 		c.Next()
 	})
+
+	// Redirect /dav paths to HTTPS when TLS is enabled
+	if cfg.TLS.Enabled {
+		r.Use(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/dav") {
+				host := c.Request.Host
+				if strings.Contains(host, ":") {
+					host = strings.SplitN(host, ":", 2)[0] + ":" + strconv.Itoa(cfg.TLS.Port)
+				} else {
+					host = host + ":" + strconv.Itoa(cfg.TLS.Port)
+				}
+				c.Redirect(301, fmt.Sprintf("https://%s%s", host, c.Request.RequestURI))
+				c.Abort()
+				return
+			}
+			c.Next()
+		})
+	}
 
 	// Request logging middleware
 	r.Use(middleware.Logger())
@@ -232,7 +252,7 @@ func main() {
 		c.Data(200, "text/html; charset=utf-8", data)
 	})
 
-	// Start server
+	// Start HTTP server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: r}
 	go func() {
@@ -241,6 +261,24 @@ func main() {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
+
+	// Start HTTPS server if TLS is enabled
+	var srvTLS *http.Server
+	if cfg.TLS.Enabled {
+		certFile, keyFile, err := tlspkg.EnsureCertificates(cfg.TLS)
+		if err != nil {
+			log.Printf("[TLS] Certificate error: %v — HTTPS not started", err)
+		} else {
+			tlsAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.TLS.Port)
+			srvTLS = &http.Server{Addr: tlsAddr, Handler: r}
+			go func() {
+				log.Printf("[TLS] HTTPS server starting at https://%s", tlsAddr)
+				if err := srvTLS.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+					log.Printf("[TLS] HTTPS server error: %v", err)
+				}
+			}()
+		}
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -251,6 +289,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
+	}
+	if srvTLS != nil {
+		if err := srvTLS.Shutdown(shutdownCtx); err != nil {
+			log.Printf("TLS server shutdown error: %v", err)
+		}
 	}
 
 	auditService.Shutdown()
