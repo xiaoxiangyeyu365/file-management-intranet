@@ -28,6 +28,7 @@ type Config struct {
 	Disk     DiskConfig     `yaml:"disk"`
 	Audit    AuditConfig    `yaml:"audit"`
 	TLS      TLSConfig      `yaml:"tls"`
+	AI       AIConfig       `yaml:"ai"`
 }
 
 type ServerConfig struct {
@@ -100,6 +101,21 @@ type TLSConfig struct {
 	Hosts   []string `yaml:"hosts"`
 }
 
+type AIConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	BaseURL          string `yaml:"base_url"`
+	APIKey           string `yaml:"api_key"`
+	Model            string `yaml:"model"`
+	VisionModel      string `yaml:"vision_model"`
+	MaxContentLength int    `yaml:"max_content_length"`
+	MaxConcurrent    int    `yaml:"max_concurrent"`
+	AutoDocument     bool   `yaml:"auto_document"`
+	AutoImage        bool   `yaml:"auto_image"`
+	AutoVideo        bool   `yaml:"auto_video"`
+	Timeout          int    `yaml:"timeout"`
+	SummaryPrompt    string `yaml:"summary_prompt"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -162,6 +178,19 @@ func Load() *Config {
 				Key:     "./data/tls/server.key",
 				CACert:  "./data/tls/ca.crt",
 			},
+			AI: AIConfig{
+				Enabled:          false,
+				BaseURL:          "https://api.deepseek.com/v1",
+				Model:            "deepseek-chat",
+				VisionModel:      "",
+				MaxContentLength: 50000,
+				MaxConcurrent:    2,
+				AutoDocument:     true,
+				AutoImage:        false,
+				AutoVideo:        false,
+				Timeout:          30,
+				SummaryPrompt:    "请用中文为以下文档内容生成一段简洁摘要（不超过200字）和5个关键标签。格式：\n摘要：...\n标签：标签1,标签2,标签3,标签4,标签5",
+			},
 		}
 
 		// Find config file
@@ -196,6 +225,10 @@ func Load() *Config {
 		if cfg.Share.Secret == "" {
 			cfg.Share.Secret = generateRandomSecret()
 			log.Println("warning: share.secret not configured, using random secret (shares will break on restart)")
+		}
+
+		if cfg.AI.APIKey == "" {
+			cfg.AI.APIKey = os.Getenv("AI_API_KEY")
 		}
 
 		// Get base directory: executable directory or current working directory
