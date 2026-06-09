@@ -38,6 +38,15 @@
       </router-link>
 
       <router-link
+        to="/chat"
+        class="nav-item"
+        :class="{ active: route.path.startsWith('/chat') }"
+      >
+        <el-icon><ChatDotRound /></el-icon>
+        <span>AI 问答</span>
+      </router-link>
+
+      <router-link
         v-if="authStore.isAdmin"
         to="/admin/users"
         class="nav-item"
@@ -73,7 +82,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { storageAPI } from '@/utils/api'
-import { Folder, Delete, Document, User, Share, List } from '@element-plus/icons-vue'
+import { Folder, Delete, Document, User, Share, List, ChatDotRound } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()

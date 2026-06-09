@@ -147,4 +147,29 @@ export const storageAPI = {
   getUsage: () => api.get('/storage/usage'),
 }
 
+// Chat API (RAG)
+export const chatAPI = {
+  createConversation: (data) => api.post('/chat/conversations', data),
+  listConversations: (limit = 20, offset = 0) =>
+    api.get('/chat/conversations', { params: { limit, offset } }),
+  getConversation: (id) => api.get(`/chat/conversations/${id}`),
+  deleteConversation: (id) => api.delete(`/chat/conversations/${id}`),
+  addFile: (conversationId, fileId) =>
+    api.post(`/chat/conversations/${conversationId}/add-file`, { fileId }),
+  ask: async (conversationId, question) => {
+    const token = localStorage.getItem('cloudbox_token')
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+    const resp = await fetch(`${baseURL}/chat/conversations/${conversationId}/ask`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+      },
+      body: JSON.stringify({ question })
+    })
+    return resp // Return raw Response for SSE streaming
+  },
+  reindexFile: (id) => api.post(`/files/${id}/reindex`)
+}
+
 export default api

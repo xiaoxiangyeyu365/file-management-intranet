@@ -8,6 +8,7 @@ import RegisterView from '@/views/RegisterView.vue'
 import AdminUsersView from '@/views/AdminUsersView.vue'
 import AdminAuditView from '@/views/AdminAuditView.vue'
 import ForcePasswordChangeView from '@/views/ForcePasswordChangeView.vue'
+const ChatView = () => import('../views/ChatView.vue')
 
 const routes = [
   {
@@ -57,6 +58,18 @@ const routes = [
     name: 'AdminAudit',
     component: AdminAuditView,
     meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/chat',
+    name: 'Chat',
+    component: ChatView,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/chat/:id',
+    name: 'ChatConversation',
+    component: ChatView,
+    meta: { requiresAuth: true }
   },
   {
     path: '/s/:token',
