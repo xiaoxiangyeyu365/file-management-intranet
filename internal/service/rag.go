@@ -6,6 +6,7 @@ import (
 	"cloudbox/internal/repository"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -421,4 +422,217 @@ func cosineSimilarity(a, b []float64) float64 {
 // estimateTokens returns a rough token count for the given text (approx. 1.5 tokens per CJK rune).
 func estimateTokens(text string) int {
 	return len([]rune(text)) * 3 / 2
+}
+
+// ChatSource represents a citation in an AI response.
+type ChatSource struct {
+	ChunkID  int64  `json:"chunkId"`
+	FileID   int64  `json:"fileId"`
+	FileName string `json:"fileName"`
+	Preview  string `json:"preview"`
+}
+
+// Reindex forces re-indexing of a file (delete existing chunks, re-index).
+func (s *RAGService) Reindex(ctx context.Context, physicalID int64, mimeType string) error {
+	if s == nil {
+		return fmt.Errorf("RAG service is not enabled")
+	}
+
+	// Delete existing chunks
+	if err := s.chunkRepo.DeleteByPhysicalFileID(ctx, physicalID); err != nil {
+		return fmt.Errorf("delete old chunks: %w", err)
+	}
+	if err := s.chunkRepo.UpdateChunkCount(ctx, physicalID, 0); err != nil {
+		return fmt.Errorf("reset chunk count: %w", err)
+	}
+
+	pf, err := s.physicalRepo.FindByID(ctx, physicalID)
+	if err != nil {
+		return fmt.Errorf("find physical file: %w", err)
+	}
+
+	return s.indexFile(ctx, pf, mimeType)
+}
+
+// Ask performs RAG Q&A with streaming output. Returns the full response text and sources.
+func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, question string, callback StreamCallback) (string, []ChatSource, error) {
+	// 1. Get conversation
+	conv, err := s.convRepo.FindByIDAndUser(ctx, conversationID, userID)
+	if err != nil {
+		return "", nil, fmt.Errorf("conversation not found: %w", err)
+	}
+
+	// 2. Resolve file IDs to physical file IDs
+	physicalIDs, fileNames, err := s.resolvePhysicalIDs(ctx, conv, userID)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve file IDs: %w", err)
+	}
+
+	if len(physicalIDs) == 0 {
+		return "", nil, fmt.Errorf("no indexed files in this conversation")
+	}
+
+	// 3. Query embedding
+	queryEmbeddings, err := s.embeddingCli.Embed(ctx, []string{question})
+	if err != nil {
+		return "", nil, fmt.Errorf("embed query: %w", err)
+	}
+	queryVec := queryEmbeddings[0]
+
+	// 4. Retrieve relevant chunks
+	topChunks, err := s.retrieveChunks(ctx, physicalIDs, queryVec, s.cfg.TopK)
+	if err != nil {
+		return "", nil, fmt.Errorf("retrieve chunks: %w", err)
+	}
+
+	if len(topChunks) == 0 {
+		return "", nil, fmt.Errorf("no relevant content found")
+	}
+
+	// 5. Build sources
+	sources := make([]ChatSource, 0, len(topChunks))
+	for _, tc := range topChunks {
+		sources = append(sources, ChatSource{
+			ChunkID:  tc.chunk.ID,
+			FileID:   tc.chunk.PhysicalFileID,
+			FileName: fileNames[tc.chunk.PhysicalFileID],
+			Preview:  truncatePreview(tc.chunk.Content, 100),
+		})
+	}
+
+	// 6. Build messages
+	messages := s.buildMessages(ctx, conversationID, question, topChunks)
+
+	// 7. Stream chat completion
+	fullContent, err := s.chatCli.ChatCompletionStream(ctx, messages, callback)
+	if err != nil {
+		return fullContent, sources, err
+	}
+
+	return fullContent, sources, nil
+}
+
+type scoredChunk struct {
+	chunk model.DocumentChunk
+	score float64
+}
+
+// retrieveChunks finds top-K chunks by cosine similarity.
+func (s *RAGService) retrieveChunks(ctx context.Context, physicalIDs []int64, queryVec []float64, topK int) ([]scoredChunk, error) {
+	chunks, err := s.chunkRepo.FindByPhysicalFileIDs(ctx, physicalIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Score all chunks
+	scored := make([]scoredChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if len(chunk.Embedding) == 0 {
+			continue
+		}
+		emb := s.encoder.Decode(chunk.Embedding)
+		score := cosineSimilarity(queryVec, emb)
+		scored = append(scored, scoredChunk{chunk: chunk, score: score})
+	}
+
+	// Sort by score descending
+	sortChunksByScore(scored)
+
+	// Return top K
+	if len(scored) > topK {
+		scored = scored[:topK]
+	}
+
+	return scored, nil
+}
+
+func sortChunksByScore(chunks []scoredChunk) {
+	// Insertion sort (topK is small)
+	for i := 1; i < len(chunks); i++ {
+		key := chunks[i]
+		j := i - 1
+		for j >= 0 && chunks[j].score < key.score {
+			chunks[j+1] = chunks[j]
+			j--
+		}
+		chunks[j+1] = key
+	}
+}
+
+// resolvePhysicalIDs converts conversation file_ids to physical file IDs.
+func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Conversation, userID int64) ([]int64, map[int64]string, error) {
+	var fileIDs []int64
+	if conv.FileIDs != "" && conv.FileIDs != "null" {
+		if err := json.Unmarshal([]byte(conv.FileIDs), &fileIDs); err != nil {
+			return nil, nil, fmt.Errorf("parse file_ids: %w", err)
+		}
+	}
+
+	if len(fileIDs) == 0 {
+		return nil, nil, nil
+	}
+
+	physicalIDs := make([]int64, 0, len(fileIDs))
+	fileNames := make(map[int64]string) // physicalID -> fileName
+	for _, fid := range fileIDs {
+		file, err := s.fileRepo.FindByIDAndOwner(ctx, fid, userID)
+		if err != nil {
+			continue // skip inaccessible files
+		}
+		if file.Physical == nil || file.Physical.ChunkCount == 0 {
+			continue // skip unindexed files
+		}
+		physicalIDs = append(physicalIDs, file.ContentRef)
+		fileNames[file.ContentRef] = file.Name
+	}
+
+	return physicalIDs, fileNames, nil
+}
+
+// buildMessages constructs the LLM message array for RAG.
+func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, question string, topChunks []scoredChunk) []chatMessage {
+	var messages []chatMessage
+
+	// System message with retrieved context
+	var contextBuilder strings.Builder
+	contextBuilder.WriteString(s.cfg.SystemPrompt)
+	contextBuilder.WriteString("\n\n---\n以下是与问题相关的文档内容：\n\n")
+	for i, tc := range topChunks {
+		contextBuilder.WriteString(fmt.Sprintf("[文档片段 %d]\n%s\n\n", i+1, tc.chunk.Content))
+	}
+	messages = append(messages, chatMessage{
+		Role:    "system",
+		Content: contextBuilder.String(),
+	})
+
+	// Recent conversation history
+	maxHistory := s.cfg.MaxHistory
+	if maxHistory <= 0 {
+		maxHistory = 10
+	}
+	recentMsgs, err := s.msgRepo.FindRecentByConversation(ctx, conversationID, maxHistory*2)
+	if err == nil {
+		for _, msg := range recentMsgs {
+			messages = append(messages, chatMessage{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+	}
+
+	// Current question
+	messages = append(messages, chatMessage{
+		Role:    "user",
+		Content: question,
+	})
+
+	return messages
+}
+
+func truncatePreview(text string, maxLen int) string {
+	runes := []rune(text)
+	if len(runes) <= maxLen {
+		return text
+	}
+	return string(runes[:maxLen]) + "..."
 }
