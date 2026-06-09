@@ -61,7 +61,13 @@ func main() {
 	// Initialize AI service
 	aiService := service.NewAIService(cfg.AI, physicalRepo, fileTagRepo, storageManager)
 
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService, aiService)
+	// Initialize RAG service
+	chunkRepo := repository.NewChunkRepository(db)
+	convRepo := repository.NewConversationRepository(db)
+	msgRepo := repository.NewMessageRepository(db)
+	ragService := service.NewRAGService(cfg.RAG, cfg.AI, physicalRepo, chunkRepo, convRepo, msgRepo, fileRepo, storageManager)
+
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService, aiService, ragService)
 	clipboardService := service.NewClipboardService(clipboardRepo, auditService)
 	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter, auditService)
 
@@ -78,6 +84,7 @@ func main() {
 	adminHandler := handler.NewAdminHandler(adminService)
 	shareHandler := handler.NewShareHandler(shareService, fileService)
 	storageHandler := handler.NewStorageHandler(physicalRepo, userRepo)
+	chatHandler := handler.NewChatHandler(ragService, fileService)
 
 	// Setup Gin
 	r := gin.Default()
@@ -175,6 +182,17 @@ func main() {
 		// AI Summary
 		protected.GET("/files/:id/ai-summary", fileHandler.GetAISummary)
 		protected.POST("/files/:id/ai-summary", fileHandler.RegenerateSummary)
+
+		// Chat (RAG)
+		protected.POST("/chat/conversations", chatHandler.CreateConversation)
+		protected.GET("/chat/conversations", chatHandler.ListConversations)
+		protected.GET("/chat/conversations/:id", chatHandler.GetConversation)
+		protected.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
+		protected.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
+		protected.POST("/chat/conversations/:id/ask", chatHandler.Ask)
+
+		// RAG reindex
+		protected.POST("/files/:id/reindex", chatHandler.ReindexFile)
 
 		// Folders
 		protected.POST("/folders", fileHandler.CreateFolder)
@@ -309,6 +327,10 @@ func main() {
 
 	if aiService != nil {
 		aiService.Shutdown()
+	}
+
+	if ragService != nil {
+		ragService.Shutdown()
 	}
 
 	log.Println("Server exited")

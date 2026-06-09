@@ -53,6 +53,7 @@ type UploadService struct {
 	defaultQuota   int64
 	audit          AuditRecorder
 	aiService      *AIService
+	ragService     *RAGService
 }
 
 func NewUploadService(
@@ -65,6 +66,7 @@ func NewUploadService(
 	defaultQuota int64,
 	audit AuditRecorder,
 	aiService *AIService,
+	ragService *RAGService,
 ) *UploadService {
 	return &UploadService{
 		fileRepo:       fileRepo,
@@ -76,6 +78,7 @@ func NewUploadService(
 		defaultQuota:   defaultQuota,
 		audit:          audit,
 		aiService:      aiService,
+		ragService:     ragService,
 	}
 }
 
@@ -335,6 +338,10 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
 	}
 
+	if s.ragService != nil {
+		go s.ragService.ProcessFile(pf.ID, pf.MimeType)
+	}
+
 	s.audit.Record(ctx, "file.upload", "file", file.ID, req.FileName, fmt.Sprintf(`{"size":%d,"instant":false}`, req.FileSize))
 
 	return file, nil
@@ -419,6 +426,10 @@ func (s *UploadService) CreateFileFromPhysical(ctx context.Context, userID, pare
 
 	if s.aiService != nil {
 		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
+	}
+
+	if s.ragService != nil {
+		go s.ragService.ProcessFile(pf.ID, pf.MimeType)
 	}
 
 	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":true,"copy":true}`, pf.Size))
@@ -527,6 +538,10 @@ func (s *UploadService) UploadFile(ctx context.Context, userID, parentID int64,
 
 	if s.aiService != nil {
 		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
+	}
+
+	if s.ragService != nil {
+		go s.ragService.ProcessFile(pf.ID, pf.MimeType)
 	}
 
 	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":false}`, size))
