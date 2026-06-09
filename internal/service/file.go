@@ -4,6 +4,7 @@ package service
 import (
 	"archive/zip"
 	"cloudbox/internal/model"
+	"cloudbox/internal/repository"
 	"context"
 	"database/sql"
 	"errors"
@@ -40,6 +41,7 @@ type FileService struct {
 	physicalRepo PhysicalFileRepository
 	storage      Storage
 	audit        AuditRecorder
+	fileTagRepo  *repository.FileTagRepository
 }
 
 func NewFileService(
@@ -47,12 +49,14 @@ func NewFileService(
 	physicalRepo PhysicalFileRepository,
 	storage Storage,
 	audit AuditRecorder,
+	fileTagRepo *repository.FileTagRepository,
 ) *FileService {
 	return &FileService{
 		fileRepo:     fileRepo,
 		physicalRepo: physicalRepo,
 		storage:      storage,
 		audit:        audit,
+		fileTagRepo:  fileTagRepo,
 	}
 }
 
@@ -290,6 +294,15 @@ func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64)
 	for _, f := range allFiles {
 		if !f.IsFolder && f.ContentRef != 0 {
 			physicalRefCount[f.ContentRef]++
+		}
+	}
+
+	// Delete tags for all files
+	if s.fileTagRepo != nil {
+		for _, f := range allFiles {
+			if err := s.fileTagRepo.DeleteByFileID(ctx, f.ID); err != nil {
+				log.Printf("warning: failed to delete tags for file %d: %v", f.ID, err)
+			}
 		}
 	}
 

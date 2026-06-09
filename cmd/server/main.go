@@ -55,10 +55,10 @@ func main() {
 
 	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password, auditService)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
-	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService)
+	fileTagRepo := repository.NewFileTagRepository(db)
+	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService, fileTagRepo)
 
 	// Initialize AI service
-	fileTagRepo := repository.NewFileTagRepository(db)
 	aiService := service.NewAIService(cfg.AI, physicalRepo, fileTagRepo, storageManager)
 
 	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService, aiService)

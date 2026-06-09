@@ -70,9 +70,25 @@ Self-signed TLS for WebDAV encryption. Config in `configs/config.yaml` under `tl
 
 ## Database
 
-MySQL by default (configs/config.yaml). Tables: `users`, `files`, `physical_files`, `clipboard_records`, `file_shares`, `audit_logs`.
+MySQL by default (configs/config.yaml). Tables: `users`, `files`, `physical_files`, `clipboard_records`, `file_shares`, `audit_logs`, `file_tags`.
 
-Schema managed in `internal/repository/db.go` — each table has a `create*Table()` function with dual SQLite/MySQL DDL. Auto-migration checks if table exists before creating. Column additions (like `disk_quota`) use raw ALTER TABLE with error suppression for "duplicate column".
+Schema managed in `internal/repository/db.go` — each table has a `create*Table()` function with dual SQLite/MySQL DDL. Auto-migration checks if table exists before creating. Column additions (like `disk_quota`, `summary`, `summary_generated_at`) use raw ALTER TABLE with error suppression for "duplicate column".
+
+## AI Summarization
+
+Self-signed LLM integration for file summaries and tags. Config in `configs/config.yaml` under `ai:`.
+
+- `ai.enabled: true` enables async AI processing after file upload
+- Summary stored on `physical_files` (dedup — same content only calls LLM once)
+- Tags stored per-File in `file_tags` table (initial copy from PhysicalFile, then independent)
+- Auto-processes text/PDF only; image/video require manual trigger via `POST /api/files/:id/ai-summary`
+- `vision_model` falls back to `model` if empty
+- Uses OpenAI-compatible API format (`/chat/completions`)
+- Response parsing expects `摘要：...\n标签：tag1,tag2,...` format
+- `ai.api_key` falls back to `AI_API_KEY` env var
+- Worker pool limits concurrent LLM calls (`max_concurrent`, default 2)
+- AIService.Shutdown() waits for in-progress tasks on graceful shutdown
+- Permanent delete cascades to file_tags; soft delete preserves tags
 
 **Config:** `configs/config.yaml` (MySQL default) or `configs/config.mysql.yaml`
 
