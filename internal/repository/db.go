@@ -87,6 +87,22 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to create file_tags table: %v", err)
 	}
 
+	// Create RAG tables
+	if err := createDocumentChunksTable(); err != nil {
+		log.Fatalf("failed to create document_chunks table: %v", err)
+	}
+	if err := createConversationsTable(); err != nil {
+		log.Fatalf("failed to create conversations table: %v", err)
+	}
+	if err := createMessagesTable(); err != nil {
+		log.Fatalf("failed to create messages table: %v", err)
+	}
+
+	// Add chunk_count column to physical_files
+	if err := DB.Exec("ALTER TABLE physical_files ADD COLUMN chunk_count INT DEFAULT 0").Error; err != nil {
+		log.Printf("physical_files.chunk_count migration: %v (may already exist)", err)
+	}
+
 	// Add summary columns to physical_files (safe to ignore "duplicate column" errors)
 	if err := DB.Exec("ALTER TABLE physical_files ADD COLUMN summary TEXT").Error; err != nil {
 		log.Printf("physical_files.summary migration: %v (may already exist)", err)
@@ -354,6 +370,131 @@ func createFileTagsTable() error {
 		}
 	}
 
+	return nil
+}
+
+func createDocumentChunksTable() error {
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='document_chunks'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = (SELECT DATABASE()) AND table_name = 'document_chunks'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE document_chunks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			physical_file_id INTEGER NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			content TEXT NOT NULL,
+			embedding BLOB,
+			token_count INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		DB.Exec("CREATE INDEX idx_chunks_physical ON document_chunks(physical_file_id, chunk_index)")
+	} else {
+		sql := `CREATE TABLE document_chunks (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			physical_file_id BIGINT NOT NULL,
+			chunk_index INT NOT NULL,
+			content TEXT NOT NULL,
+			embedding LONGBLOB,
+			token_count INT DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			INDEX idx_chunks_physical (physical_file_id, chunk_index)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createConversationsTable() error {
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = (SELECT DATABASE()) AND table_name = 'conversations'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE conversations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			title VARCHAR(200),
+			file_ids TEXT,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		DB.Exec("CREATE INDEX idx_conversations_user ON conversations(user_id, updated_at DESC)")
+	} else {
+		sql := `CREATE TABLE conversations (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			user_id BIGINT NOT NULL,
+			title VARCHAR(200),
+			file_ids TEXT,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			INDEX idx_conversations_user (user_id, updated_at DESC)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createMessagesTable() error {
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='messages'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = (SELECT DATABASE()) AND table_name = 'messages'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id INTEGER NOT NULL,
+			role VARCHAR(20) NOT NULL,
+			content TEXT NOT NULL,
+			sources TEXT,
+			created_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		DB.Exec("CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at)")
+	} else {
+		sql := `CREATE TABLE messages (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			conversation_id BIGINT NOT NULL,
+			role VARCHAR(20) NOT NULL,
+			content TEXT NOT NULL,
+			sources TEXT,
+			created_at DATETIME NOT NULL,
+			INDEX idx_messages_conversation (conversation_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
