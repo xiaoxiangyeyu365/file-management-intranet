@@ -15,6 +15,7 @@ type PhysicalFile struct {
 	MetadataJSON       string     `gorm:"type:text" json:"metadataJson"`
 	Summary            string     `gorm:"type:text" json:"summary"`
 	SummaryGeneratedAt *time.Time `json:"summaryGeneratedAt"`
+	ChunkCount         int        `gorm:"default:0" json:"chunkCount"`
 	CreatedAt          time.Time  `json:"createdAt"`
 }
 
