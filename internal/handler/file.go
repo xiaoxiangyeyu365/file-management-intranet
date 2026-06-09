@@ -15,10 +15,11 @@ import (
 
 type FileHandler struct {
 	fileService *service.FileService
+	aiService   *service.AIService
 }
 
-func NewFileHandler(fileService *service.FileService) *FileHandler {
-	return &FileHandler{fileService: fileService}
+func NewFileHandler(fileService *service.FileService, aiService *service.AIService) *FileHandler {
+	return &FileHandler{fileService: fileService, aiService: aiService}
 }
 
 type CreateFolderRequest struct {
@@ -421,4 +422,92 @@ func (h *FileHandler) BatchDownload(c *gin.Context) {
 	if err := h.fileService.StreamBatchZip(c.Request.Context(), userID, fileIDs, c.Writer); err != nil {
 		log.Printf("error streaming batch zip: %v", err)
 	}
+}
+
+// GetAISummary godoc
+// @Summary 获取文件的AI摘要
+// @Description 获取文件的AI生成摘要和标签
+// @Tags ai
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "摘要和标签"
+// @Router /api/files/{id}/ai-summary [get]
+func (h *FileHandler) GetAISummary(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Error(c, 400, "invalid file ID")
+		return
+	}
+
+	userID := GetUserID(c)
+	file, err := h.fileService.GetFile(c.Request.Context(), userID, id)
+	if err != nil {
+		response.Error(c, 404, "file not found")
+		return
+	}
+
+	if file.Physical == nil || file.Physical.Summary == "" {
+		response.Error(c, 404, "no AI summary available")
+		return
+	}
+
+	tags, _ := h.aiService.GetTags(c.Request.Context(), id)
+
+	c.JSON(200, gin.H{
+		"summary":      file.Physical.Summary,
+		"tags":         tags,
+		"generated_at": file.Physical.SummaryGeneratedAt,
+	})
+}
+
+// RegenerateSummary godoc
+// @Summary 重新生成文件的AI摘要
+// @Description 手动触发重新生成文件的AI摘要和标签
+// @Tags ai
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "新生成的摘要和标签"
+// @Router /api/files/{id}/ai-summary [post]
+func (h *FileHandler) RegenerateSummary(c *gin.Context) {
+	if h.aiService == nil {
+		response.Error(c, 403, "AI service is not enabled")
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Error(c, 400, "invalid file ID")
+		return
+	}
+
+	userID := GetUserID(c)
+	role, _ := c.Get("role")
+	file, err := h.fileService.GetFile(c.Request.Context(), userID, id)
+	if err != nil {
+		response.Error(c, 404, "file not found")
+		return
+	}
+
+	if file.OwnerID != userID && role != "admin" {
+		response.Error(c, 403, "not authorized")
+		return
+	}
+
+	if file.Physical == nil {
+		response.Error(c, 400, "file has no physical content")
+		return
+	}
+
+	summary, tags, err := h.aiService.ProcessFileSync(c.Request.Context(), id, file.ContentRef, file.Physical.MimeType)
+	if err != nil {
+		response.Error(c, 500, "AI processing failed: "+err.Error())
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"summary": summary,
+		"tags":    tags,
+	})
 }

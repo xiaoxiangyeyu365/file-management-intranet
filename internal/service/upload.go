@@ -52,6 +52,7 @@ type UploadService struct {
 	previewService ImageProcessor
 	defaultQuota   int64
 	audit          AuditRecorder
+	aiService      *AIService
 }
 
 func NewUploadService(
@@ -63,6 +64,7 @@ func NewUploadService(
 	chunkSize int64,
 	defaultQuota int64,
 	audit AuditRecorder,
+	aiService *AIService,
 ) *UploadService {
 	return &UploadService{
 		fileRepo:       fileRepo,
@@ -73,6 +75,7 @@ func NewUploadService(
 		previewService: previewService,
 		defaultQuota:   defaultQuota,
 		audit:          audit,
+		aiService:      aiService,
 	}
 }
 
@@ -328,6 +331,10 @@ func (s *UploadService) CompleteUpload(ctx context.Context, userID int64, upload
 		go s.previewService.ProcessImage(context.Background(), pf.ID)
 	}
 
+	if s.aiService != nil {
+		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
+	}
+
 	s.audit.Record(ctx, "file.upload", "file", file.ID, req.FileName, fmt.Sprintf(`{"size":%d,"instant":false}`, req.FileSize))
 
 	return file, nil
@@ -391,6 +398,10 @@ func (s *UploadService) CreateFileFromPhysical(ctx context.Context, userID, pare
 
 	if s.previewService != nil {
 		go s.previewService.ProcessImage(context.Background(), pf.ID)
+	}
+
+	if s.aiService != nil {
+		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
 	}
 
 	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":true,"copy":true}`, pf.Size))
@@ -495,6 +506,10 @@ func (s *UploadService) UploadFile(ctx context.Context, userID, parentID int64,
 	// Process image asynchronously (thumbnail + metadata)
 	if s.previewService != nil {
 		go s.previewService.ProcessImage(context.Background(), pf.ID)
+	}
+
+	if s.aiService != nil {
+		go s.aiService.ProcessFile(file.ID, pf.ID, pf.MimeType)
 	}
 
 	s.audit.Record(ctx, "file.upload", "file", file.ID, name, fmt.Sprintf(`{"size":%d,"instant":false}`, size))

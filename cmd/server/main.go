@@ -56,13 +56,18 @@ func main() {
 	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password, auditService)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService)
-	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService)
+
+	// Initialize AI service
+	fileTagRepo := repository.NewFileTagRepository(db)
+	aiService := service.NewAIService(cfg.AI, physicalRepo, fileTagRepo, storageManager)
+
+	uploadService := service.NewUploadService(fileRepo, physicalRepo, userRepo, storageManager, previewService, cfg.Upload.ChunkSize, cfg.Disk.DefaultQuota, auditService, aiService)
 	clipboardService := service.NewClipboardService(clipboardRepo, auditService)
 	shareService := service.NewShareService(shareRepo, fileRepo, physicalRepo, storageManager, fileService, cryptoAdapter, auditService)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
-	fileHandler := handler.NewFileHandler(fileService)
+	fileHandler := handler.NewFileHandler(fileService, aiService)
 	previewHandler := handler.NewPreviewHandler(previewService, fileService)
 	trashHandler := handler.NewTrashHandler(fileService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
@@ -166,6 +171,10 @@ func main() {
 		protected.PUT("/files/:id", fileHandler.RenameFile)
 		protected.DELETE("/files/:id", fileHandler.DeleteFile)
 		protected.PATCH("/files/move", fileHandler.MoveFiles)
+
+		// AI Summary
+		protected.GET("/files/:id/ai-summary", fileHandler.GetAISummary)
+		protected.POST("/files/:id/ai-summary", fileHandler.RegenerateSummary)
 
 		// Folders
 		protected.POST("/folders", fileHandler.CreateFolder)
@@ -297,6 +306,11 @@ func main() {
 	}
 
 	auditService.Shutdown()
+
+	if aiService != nil {
+		aiService.Shutdown()
+	}
+
 	log.Println("Server exited")
 }
 
