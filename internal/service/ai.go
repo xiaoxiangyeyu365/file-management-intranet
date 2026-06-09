@@ -351,6 +351,7 @@ func extractPDFText(path string) (string, error) {
 	if _, err := io.Copy(&buf, b); err != nil {
 		return "", err
 	}
+
 	return buf.String(), nil
 }
 
