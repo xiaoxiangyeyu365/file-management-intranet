@@ -217,6 +217,15 @@ func (s *AIService) generateSummary(ctx context.Context, pf *model.PhysicalFile,
 func (s *AIService) extractContent(pf *model.PhysicalFile, mimeType string) (string, bool, error) {
 	absPath := s.storage.ToAbsPath(pf.StoragePath)
 
+	// Fallback: detect MIME type from extension if it's generic
+	if mimeType == "application/octet-stream" || mimeType == "" {
+		detected := detectMimeTypeFromPath(absPath)
+		if detected != "application/octet-stream" {
+			mimeType = detected
+			log.Printf("[AI] Detected MIME type from extension: %s -> %s", pf.StoragePath, mimeType)
+		}
+	}
+
 	if isDocumentType(mimeType) {
 		if isPDFType(mimeType) {
 			text, err := extractPDFText(absPath)
@@ -374,4 +383,45 @@ func decodeGBK(data []byte) (string, error) {
 		return "", err
 	}
 	return string(decoded), nil
+}
+
+// detectMimeTypeFromPath detects MIME type from file extension.
+func detectMimeTypeFromPath(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeTypes := map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+		".pdf":  "application/pdf",
+		".doc":  "application/msword",
+		".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".xls":  "application/vnd.ms-excel",
+		".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".mp4":  "video/mp4",
+		".mp3":  "audio/mpeg",
+		".zip":  "application/zip",
+		".txt":  "text/plain",
+		".md":   "text/markdown",
+		".json": "application/json",
+		".csv":  "text/csv",
+		".log":  "text/plain",
+		".xml":  "application/xml",
+		".yaml": "text/yaml",
+		".yml":  "text/yaml",
+		".ini":  "text/plain",
+		".cfg":  "text/plain",
+		".conf": "text/plain",
+		".sh":   "application/x-sh",
+		".py":   "text/x-python",
+		".js":   "application/javascript",
+		".html": "text/html",
+		".htm":  "text/html",
+		".css":  "text/css",
+	}
+	if mt, ok := mimeTypes[ext]; ok {
+		return mt
+	}
+	return "application/octet-stream"
 }
