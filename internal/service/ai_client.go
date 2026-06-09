@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -140,4 +141,109 @@ func (c *AIClient) doChatCompletion(ctx context.Context, content interface{}) (s
 	}
 
 	return chatResp.Choices[0].Message.Content, nil
+}
+
+// chatStreamRequest is the request body for streaming chat completions.
+type chatStreamRequest struct {
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
+}
+
+// StreamCallback is called for each token in a streaming response.
+type StreamCallback func(content string) error
+
+// ChatCompletionStream sends a multi-turn chat request with streaming.
+// callback is invoked for each content delta. Returns the full accumulated content.
+func (c *AIClient) ChatCompletionStream(ctx context.Context, messages []chatMessage, callback StreamCallback) (string, error) {
+	reqBody := chatStreamRequest{
+		Model:    c.config.Model,
+		Messages: messages,
+		Stream:   true,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal stream request: %w", err)
+	}
+
+	url := c.config.BaseURL + "/chat/completions"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create stream request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("send stream request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("stream API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var fullContent strings.Builder
+	buf := make([]byte, 0, 4096)
+	tmp := make([]byte, 1024)
+
+	for {
+		n, readErr := resp.Body.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			// Process complete lines
+			for {
+				newlineIdx := bytes.IndexByte(buf, '\n')
+				if newlineIdx < 0 {
+					break
+				}
+				line := string(buf[:newlineIdx])
+				buf = buf[newlineIdx+1:]
+
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if !strings.HasPrefix(line, "data: ") {
+					continue
+				}
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					return fullContent.String(), nil
+				}
+
+				var chunk struct {
+					Choices []struct {
+						Delta struct {
+							Content string `json:"content"`
+						} `json:"delta"`
+					} `json:"choices"`
+				}
+				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+					continue
+				}
+				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+					delta := chunk.Choices[0].Delta.Content
+					fullContent.WriteString(delta)
+					if callback != nil {
+						if err := callback(delta); err != nil {
+							return fullContent.String(), err
+						}
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return fullContent.String(), readErr
+		}
+	}
+
+	return fullContent.String(), nil
 }
