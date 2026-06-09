@@ -376,6 +376,23 @@ func detectMimeType(filename string) string {
 		".mp4":  "video/mp4",
 		".mp3":  "audio/mpeg",
 		".zip":  "application/zip",
+		".txt":  "text/plain",
+		".md":   "text/markdown",
+		".json": "application/json",
+		".csv":  "text/csv",
+		".log":  "text/plain",
+		".xml":  "application/xml",
+		".yaml": "text/yaml",
+		".yml":  "text/yaml",
+		".ini":  "text/plain",
+		".cfg":  "text/plain",
+		".conf": "text/plain",
+		".sh":   "application/x-sh",
+		".py":   "text/x-python",
+		".js":   "application/javascript",
+		".html": "text/html",
+		".htm":  "text/html",
+		".css":  "text/css",
 	}
 	if mt, ok := mimeTypes[ext]; ok {
 		return mt
