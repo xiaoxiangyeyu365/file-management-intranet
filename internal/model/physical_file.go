@@ -12,8 +12,10 @@ type PhysicalFile struct {
 	ThumbnailPath string    `gorm:"size:500" json:"thumbnailPath"`
 	Width         int       `gorm:"default:0" json:"width"`
 	Height        int       `gorm:"default:0" json:"height"`
-	MetadataJSON  string    `gorm:"type:text" json:"metadataJson"`
-	CreatedAt     time.Time `json:"createdAt"`
+	MetadataJSON       string     `gorm:"type:text" json:"metadataJson"`
+	Summary            string     `gorm:"type:text" json:"summary"`
+	SummaryGeneratedAt *time.Time `json:"summaryGeneratedAt"`
+	CreatedAt          time.Time  `json:"createdAt"`
 }
 
 func (PhysicalFile) TableName() string {

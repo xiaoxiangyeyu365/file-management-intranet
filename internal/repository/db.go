@@ -82,6 +82,19 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to create audit_logs table: %v", err)
 	}
 
+	// Create file_tags table
+	if err := createFileTagsTable(); err != nil {
+		log.Fatalf("failed to create file_tags table: %v", err)
+	}
+
+	// Add summary columns to physical_files (safe to ignore "duplicate column" errors)
+	if err := DB.Exec("ALTER TABLE physical_files ADD COLUMN summary TEXT").Error; err != nil {
+		log.Printf("physical_files.summary migration: %v (may already exist)", err)
+	}
+	if err := DB.Exec("ALTER TABLE physical_files ADD COLUMN summary_generated_at DATETIME NULL").Error; err != nil {
+		log.Printf("physical_files.summary_generated_at migration: %v (may already exist)", err)
+	}
+
 	// Create default admin
 	createDefaultAdmin(cfg)
 
@@ -293,6 +306,48 @@ func createAuditLogsTable() error {
 			INDEX idx_audit_user (user_id),
 			INDEX idx_audit_action (action),
 			INDEX idx_audit_time (created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func createFileTagsTable() error {
+	// Check if table exists
+	var count int64
+	if DB.Dialector.Name() == "sqlite" {
+		DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_tags'").Scan(&count)
+	} else {
+		DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'cloudbox' AND table_name = 'file_tags'").Scan(&count)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if DB.Dialector.Name() == "sqlite" {
+		sql := `CREATE TABLE file_tags (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			file_id INTEGER NOT NULL,
+			tag VARCHAR(50) NOT NULL,
+			created_at DATETIME NOT NULL
+		)`
+		if err := DB.Exec(sql).Error; err != nil {
+			return err
+		}
+		// Create indexes separately for SQLite
+		DB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_file_tag ON file_tags(file_id, tag)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_tag ON file_tags(tag)")
+	} else {
+		sql := `CREATE TABLE file_tags (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			file_id BIGINT NOT NULL,
+			tag VARCHAR(50) NOT NULL,
+			created_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_file_tag (file_id, tag),
+			INDEX idx_tag (tag)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 		if err := DB.Exec(sql).Error; err != nil {
 			return err
