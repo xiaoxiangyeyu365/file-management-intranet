@@ -29,6 +29,7 @@ type Config struct {
 	Audit    AuditConfig    `yaml:"audit"`
 	TLS      TLSConfig      `yaml:"tls"`
 	AI       AIConfig       `yaml:"ai"`
+	RAG      RAGConfig      `yaml:"rag"`
 }
 
 type ServerConfig struct {
@@ -116,6 +117,26 @@ type AIConfig struct {
 	SummaryPrompt    string `yaml:"summary_prompt"`
 }
 
+type RAGConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	EmbeddingBaseURL    string `yaml:"embedding_base_url"`
+	EmbeddingAPIKey     string `yaml:"embedding_api_key"`
+	EmbeddingModel      string `yaml:"embedding_model"`
+	EmbeddingDimensions int    `yaml:"embedding_dimensions"`
+	ChunkMinSize        int    `yaml:"chunk_min_size"`
+	ChunkMaxSize        int    `yaml:"chunk_max_size"`
+	ChunkOverlap        int    `yaml:"chunk_overlap"`
+	EmbeddingBatchSize  int    `yaml:"embedding_batch_size"`
+	MaxConcurrent       int    `yaml:"max_concurrent"`
+	TopK                int    `yaml:"top_k"`
+	MaxHistory          int    `yaml:"max_history"`
+	Timeout             int    `yaml:"timeout"`
+	ChatModel           string `yaml:"chat_model"`
+	ChatBaseURL         string `yaml:"chat_base_url"`
+	ChatAPIKey          string `yaml:"chat_api_key"`
+	SystemPrompt        string `yaml:"system_prompt"`
+}
+
 var (
 	cfg  *Config
 	once sync.Once
@@ -191,6 +212,25 @@ func Load() *Config {
 				Timeout:          30,
 				SummaryPrompt:    "请用中文为以下文档内容生成一段简洁摘要（不超过200字）和5个关键标签。格式：\n摘要：...\n标签：标签1,标签2,标签3,标签4,标签5",
 			},
+			RAG: RAGConfig{
+				Enabled:             false,
+				EmbeddingBaseURL:    "",
+				EmbeddingAPIKey:     "",
+				EmbeddingModel:      "",
+				EmbeddingDimensions: 1024,
+				ChunkMinSize:        100,
+				ChunkMaxSize:        500,
+				ChunkOverlap:        50,
+				EmbeddingBatchSize:  20,
+				MaxConcurrent:       2,
+				TopK:                5,
+				MaxHistory:          10,
+				Timeout:             30,
+				ChatModel:           "",
+				ChatBaseURL:         "",
+				ChatAPIKey:          "",
+				SystemPrompt:        "你是一个文档助手。基于提供的上下文内容回答用户问题。如果上下文中没有相关信息，请明确说明。",
+			},
 		}
 
 		// Find config file
@@ -229,6 +269,10 @@ func Load() *Config {
 
 		if cfg.AI.APIKey == "" {
 			cfg.AI.APIKey = os.Getenv("AI_API_KEY")
+		}
+
+		if cfg.RAG.EmbeddingAPIKey == "" {
+			cfg.RAG.EmbeddingAPIKey = os.Getenv("RAG_EMBEDDING_API_KEY")
 		}
 
 		// Get base directory: executable directory or current working directory
