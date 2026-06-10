@@ -1,5 +1,7 @@
 # Config (contains secrets)
 configs/config.yaml
+configs/config.docker.yaml
+configs/config.mysql.yaml
 
 # Data directories
 data/
@@ -13,6 +15,11 @@ data/
 # Build output
 cloudbox
 cloudbox.exe
+server.exe
+*.exe~
+
+# Static build artifacts
+static/assets/
 
 # IDE
 .idea/
@@ -34,3 +41,7 @@ web/dist/
 # Temp
 *.tmp
 *.log
+
+# Tools
+.claude/
+.superpowers/

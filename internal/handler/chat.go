@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -394,7 +395,11 @@ func (h *ChatHandler) ReindexFile(c *gin.Context) {
 		return
 	}
 
-	go h.ragService.Reindex(context.Background(), file.ContentRef, file.Physical.MimeType)
+	go func() {
+		if err := h.ragService.Reindex(context.Background(), file.ContentRef, file.Physical.MimeType); err != nil {
+			log.Printf("[RAG] Reindex failed for file %d (physical %d): %v", id, file.ContentRef, err)
+		}
+	}()
 
 	c.JSON(http.StatusAccepted, gin.H{"status": "processing"})
 }
