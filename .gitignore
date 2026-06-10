@@ -1,22 +1,18 @@
-# Build artifacts
-cloudbox.exe
-cloudbox
-*.exe
+# Config (contains secrets)
+configs/config.yaml
 
-# Runtime data
+# Data directories
 data/
+*.db
 
-# Node modules
-web/node_modules/
-web/.vite/
+# TLS certificates
+*.crt
+*.key
+*.pem
 
-# Build output (rebuilt from source)
-static/assets/
-static/*.css
-static/*.js
-!static/index.html
-!static/favicon.ico
-!static/static.go
+# Build output
+cloudbox
+cloudbox.exe
 
 # IDE
 .idea/
@@ -28,19 +24,13 @@ static/*.js
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Go
+vendor/
 
-# Superpowers plugin
-.superpowers/
+# Node
+web/node_modules/
+web/dist/
 
-# Test/debug scripts (not part of project)
-check_*.go
-cmd/debug/
-
-# Logs
-*.log
-
-# Temporary files
+# Temp
 *.tmp
-*.temp
+*.log
