@@ -190,6 +190,7 @@ func main() {
 		protected.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
 		protected.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
 		protected.POST("/chat/conversations/:id/ask", chatHandler.Ask)
+		protected.GET("/chat/conversations/:id/ask", chatHandler.AskSSE)
 
 		// RAG reindex
 		protected.POST("/files/:id/reindex", chatHandler.ReindexFile)

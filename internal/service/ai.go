@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/zip"
 	"cloudbox/internal/config"
 	"cloudbox/internal/model"
 	"cloudbox/internal/repository"
@@ -231,6 +232,10 @@ func (s *AIService) extractContent(pf *model.PhysicalFile, mimeType string) (str
 			text, err := extractPDFText(absPath)
 			return text, false, err
 		}
+		if isDOCXType(mimeType) {
+			text, err := extractDOCXText(absPath)
+			return text, false, err
+		}
 		text, err := extractTextFile(absPath)
 		return text, false, err
 	}
@@ -319,11 +324,54 @@ func shouldAutoProcess(mimeType string, cfg config.AIConfig) bool {
 }
 
 func isDocumentType(mimeType string) bool {
-	return strings.HasPrefix(mimeType, "text/") || mimeType == "application/pdf"
+	return strings.HasPrefix(mimeType, "text/") || mimeType == "application/pdf" ||
+		mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+		mimeType == "application/msword"
 }
 
 func isPDFType(mimeType string) bool {
 	return mimeType == "application/pdf"
+}
+
+func isDOCXType(mimeType string) bool {
+	return mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+}
+
+func extractDOCXText(path string) (string, error) {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if f.Name == "word/document.xml" {
+			rc, err := f.Open()
+			if err != nil {
+				return "", err
+			}
+			defer rc.Close()
+
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return "", err
+			}
+
+			// Extract text between <w:t> tags
+			content := string(data)
+			var buf strings.Builder
+			re := regexp.MustCompile(`>([^<]+)<`)
+			for _, match := range re.FindAllStringSubmatch(content, -1) {
+				text := strings.TrimSpace(match[1])
+				if text != "" {
+					buf.WriteString(text)
+				}
+			}
+			return buf.String(), nil
+		}
+	}
+
+	return "", fmt.Errorf("word/document.xml not found in docx")
 }
 
 func isVideoType(mimeType string) bool {

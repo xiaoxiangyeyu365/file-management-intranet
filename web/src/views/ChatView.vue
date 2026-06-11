@@ -46,7 +46,8 @@
             <div class="message-bubble">
               <div class="message-content">{{ msg.content }}</div>
               <div v-if="msg.status === 'error'" class="message-error">
-                回复中断
+                <span v-if="msg.content">{{ msg.content }}</span>
+                <span v-else>回复中断</span>
                 <el-button size="small" text type="primary" @click="chatStore.retryAsk()">
                   重试
                 </el-button>
@@ -92,6 +93,26 @@
         </div>
       </template>
     </div>
+
+    <!-- File Selection Dialog -->
+    <el-dialog v-model="fileDialogVisible" title="选择文件" width="500px">
+      <div class="file-select-list">
+        <el-checkbox-group v-model="selectedFileIds">
+          <div v-for="file in availableFiles" :key="file.id" class="file-select-item">
+            <el-checkbox :label="file.id" :disabled="file.isFolder">
+              {{ file.name }}
+            </el-checkbox>
+          </div>
+        </el-checkbox-group>
+        <div v-if="availableFiles.length === 0" class="empty-hint">暂无文件</div>
+      </div>
+      <template #footer>
+        <el-button @click="fileDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmFileSelection" :disabled="selectedFileIds.length === 0">
+          确定 ({{ selectedFileIds.length }} 个文件)
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -99,6 +120,7 @@
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
+import { fileAPI } from '@/utils/api'
 import { Delete, Promotion } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { computed } from 'vue'
@@ -109,6 +131,9 @@ const chatStore = useChatStore()
 
 const inputText = ref('')
 const messageArea = ref(null)
+const fileDialogVisible = ref(false)
+const availableFiles = ref([])
+const selectedFileIds = ref([])
 
 const currentId = computed(() => {
   const id = route.params.id
@@ -153,7 +178,20 @@ function scrollToBottom() {
 }
 
 async function handleNewConversation() {
-  const conv = await chatStore.createConversation()
+  try {
+    const res = await fileAPI.list(0)
+    const data = res.data || res
+    availableFiles.value = (data.files || data || []).filter(f => !f.isFolder)
+    selectedFileIds.value = []
+    fileDialogVisible.value = true
+  } catch (e) {
+    console.error('Failed to load files', e)
+  }
+}
+
+async function confirmFileSelection() {
+  fileDialogVisible.value = false
+  const conv = await chatStore.createConversation(selectedFileIds.value)
   router.push(`/chat/${conv.id}`)
 }
 
@@ -365,6 +403,16 @@ async function handleAsk() {
   text-align: center;
   color: #909399;
   padding: 16px;
+}
+
+.file-select-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.file-select-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 @media (max-width: 767px) {

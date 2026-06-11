@@ -404,6 +404,104 @@ func (h *ChatHandler) ReindexFile(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"status": "processing"})
 }
 
+// AskSSE is a GET endpoint for SSE streaming (compatible with EventSource).
+func (h *ChatHandler) AskSSE(c *gin.Context) {
+	if h.ragService == nil {
+		c.SSEvent("error", gin.H{"error": "RAG service is not enabled"})
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.SSEvent("error", gin.H{"error": "invalid conversation ID"})
+		return
+	}
+
+	question := c.Query("q")
+	if question == "" {
+		c.SSEvent("error", gin.H{"error": "question is required"})
+		return
+	}
+
+	userID := GetUserID(c)
+
+	convRepo := repository.NewConversationRepository(repository.DB)
+	conv, err := convRepo.FindByIDAndUser(c.Request.Context(), id, userID)
+	if err != nil {
+		c.SSEvent("error", gin.H{"error": "conversation not found"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	msgRepo := repository.NewMessageRepository(repository.DB)
+	userMsg := &model.Message{
+		ConversationID: id,
+		Role:           "user",
+		Content:        question,
+		CreatedAt:      time.Now(),
+	}
+	msgRepo.Create(c.Request.Context(), userMsg)
+
+	msgCount, _ := msgRepo.CountByConversation(c.Request.Context(), id)
+	if msgCount <= 1 {
+		title := question
+		runes := []rune(title)
+		if len(runes) > 30 {
+			title = string(runes[:30])
+		}
+		conv.Title = title
+		conv.UpdatedAt = time.Now()
+		convRepo.Update(c.Request.Context(), conv)
+	}
+
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	go func() {
+		<-c.Request.Context().Done()
+		cancel()
+	}()
+
+	callback := func(content string) error {
+		fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"content": content}))
+		c.Writer.Flush()
+		return nil
+	}
+
+	fullContent, sources, err := h.ragService.Ask(ctx, id, userID, question, callback)
+
+	var sourcesJSON string
+	if len(sources) > 0 {
+		b, _ := json.Marshal(sources)
+		sourcesJSON = string(b)
+	}
+
+	if err != nil && fullContent == "" {
+		fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"error": err.Error()}))
+		c.Writer.Flush()
+		return
+	}
+
+	assistantMsg := &model.Message{
+		ConversationID: id,
+		Role:           "assistant",
+		Content:        fullContent,
+		Sources:        sourcesJSON,
+		CreatedAt:      time.Now(),
+	}
+	msgRepo.Create(c.Request.Context(), assistantMsg)
+
+	conv.UpdatedAt = time.Now()
+	convRepo.Update(c.Request.Context(), conv)
+
+	fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"messageId": assistantMsg.ID, "sources": sources}))
+	c.Writer.Flush()
+}
+
 func mustJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)

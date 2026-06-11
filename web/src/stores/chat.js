@@ -88,64 +88,28 @@ export const useChatStore = defineStore('chat', {
       this.isStreaming = true
       this.streamError = null
 
-      try {
-        const resp = await chatAPI.ask(this.currentConversation.id, question)
-
-        if (!resp.ok) {
-          const errData = await resp.json()
-          throw new Error(errData.message || 'Request failed')
-        }
-
-        const reader = resp.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed) continue
-
-            if (trimmed.startsWith('data: ')) {
-              const data = trimmed.slice(6)
-              try {
-                const parsed = JSON.parse(data)
-
-                if (parsed.content !== undefined) {
-                  tempMsg.content += parsed.content
-                }
-                if (parsed.messageId !== undefined) {
-                  tempMsg.id = parsed.messageId
-                  tempMsg.status = 'done'
-                  tempMsg.sources = parsed.sources || null
-                }
-                if (parsed.error) {
-                  tempMsg.status = 'error'
-                  this.streamError = parsed.error
-                }
-              } catch (e) {
-                // Skip unparseable data lines
-              }
-            }
-          }
-        }
-
-        // Ensure final state
-        if (tempMsg.status === 'streaming') {
+      chatAPI.ask(
+        this.currentConversation.id,
+        question,
+        // onToken
+        (content) => {
+          tempMsg.content += content
+        },
+        // onDone
+        (data) => {
+          tempMsg.id = data.messageId || tempMsg.id
           tempMsg.status = 'done'
+          tempMsg.sources = data.sources || null
+          this.isStreaming = false
+        },
+        // onError
+        (error) => {
+          tempMsg.status = 'error'
+          tempMsg.content = error
+          this.streamError = error
+          this.isStreaming = false
         }
-      } catch (e) {
-        tempMsg.status = 'error'
-        this.streamError = e.message
-      } finally {
-        this.isStreaming = false
-      }
+      )
     },
 
     async retryAsk() {

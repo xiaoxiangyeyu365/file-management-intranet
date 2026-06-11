@@ -253,6 +253,10 @@ func (s *RAGService) extractContent(pf *model.PhysicalFile, mimeType string) (st
 		return extractPDFText(absPath)
 	}
 
+	if isDOCXType(mimeType) {
+		return extractDOCXText(absPath)
+	}
+
 	return extractTextFile(absPath)
 }
 

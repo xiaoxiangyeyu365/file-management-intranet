@@ -156,18 +156,33 @@ export const chatAPI = {
   deleteConversation: (id) => api.delete(`/chat/conversations/${id}`),
   addFile: (conversationId, fileId) =>
     api.post(`/chat/conversations/${conversationId}/add-file`, { fileId }),
-  ask: async (conversationId, question) => {
+  ask: (conversationId, question, onToken, onDone, onError) => {
     const token = localStorage.getItem('cloudbox_token')
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-    const resp = await fetch(`${baseURL}/chat/conversations/${conversationId}/ask`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : ''
-      },
-      body: JSON.stringify({ question })
-    })
-    return resp // Return raw Response for SSE streaming
+    const url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}&token=${encodeURIComponent(token || '')}`
+    const es = new EventSource(url)
+
+    es.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data)
+        if (parsed.content !== undefined && onToken) onToken(parsed.content)
+        if (parsed.messageId !== undefined) {
+          if (onDone) onDone(parsed)
+          es.close()
+        }
+        if (parsed.error) {
+          if (onError) onError(parsed.error)
+          es.close()
+        }
+      } catch (e) { /* skip */ }
+    }
+
+    es.onerror = () => {
+      if (onError) onError('连接中断')
+      es.close()
+    }
+
+    return es
   },
   reindexFile: (id) => api.post(`/files/${id}/reindex`)
 }
