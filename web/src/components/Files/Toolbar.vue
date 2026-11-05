@@ -68,7 +68,7 @@ const filesStore = useFilesStore()
 const uploadStore = useUploadStore()
 
 const fileInputRef = ref(null)
-const viewMode = ref(filesStore.viewMode)
+const viewMode = computed(() => filesStore.viewMode)
 
 const emit = defineEmits(['upload', 'create-folder'])
 
@@ -90,7 +90,6 @@ function handleFileSelect(event) {
 function setViewMode(mode) {
   if (filesStore.viewMode !== mode) {
     filesStore.toggleViewMode()
-    viewMode.value = filesStore.viewMode
   }
 }
 

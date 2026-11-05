@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"cloudbox/internal/repository"
 	"cloudbox/internal/util/crypto"
 	"cloudbox/internal/util/response"
 	"context"
@@ -22,7 +23,7 @@ func JWTMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// Fall back to query parameter (for cross-origin downloads)
+		// Fall back to query parameter (for window.open downloads — browser navigation cannot set headers)
 		if token == "" {
 			token = c.Query("token")
 		}
@@ -40,9 +41,25 @@ func JWTMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Verify token version matches current user version (invalidates tokens on role/status/password change)
+		if repository.DB != nil {
+			var currentVersion int64
+			if err := repository.DB.WithContext(c.Request.Context()).
+				Table("users").Where("id = ?", claims.UserID).
+				Select("COALESCE(token_version, 0)").
+				Scan(&currentVersion).Error; err == nil {
+				if currentVersion != claims.TokenVersion {
+					response.Unauthorized(c, "token has been revoked, please re-login")
+					c.Abort()
+					return
+				}
+			}
+		}
+
 		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+		c.Set("pwdChanged", claims.PasswordChanged)
 
 		// Inject user info into request context for audit logging
 		ctx := context.WithValue(c.Request.Context(), "userID", claims.UserID)
@@ -50,6 +67,20 @@ func JWTMiddleware() gin.HandlerFunc {
 		ctx = context.WithValue(ctx, "clientIP", c.ClientIP())
 		c.Request = c.Request.WithContext(ctx)
 
+		c.Next()
+	}
+}
+
+// PasswordChangeRequiredMiddleware blocks access for users who haven't changed their password.
+// Must be used after JWTMiddleware.
+func PasswordChangeRequiredMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		pwdChanged, exists := c.Get("pwdChanged")
+		if exists && !pwdChanged.(bool) {
+			response.Error(c, 403, "请先修改密码")
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

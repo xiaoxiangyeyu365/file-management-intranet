@@ -99,6 +99,9 @@ func NewRAGService(
 			Model:   chatModel,
 			Timeout: cfg.Timeout,
 		})
+	} else {
+		log.Println("[RAG] WARNING: chat config incomplete (chat_model, chat_base_url required for Ask), RAG chat disabled")
+		return nil
 	}
 
 	concurrent := cfg.MaxConcurrent

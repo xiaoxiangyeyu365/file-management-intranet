@@ -56,7 +56,7 @@ func main() {
 	authService := service.NewAuthService(userRepo, cryptoAdapter, cryptoAdapter, cfg.Auth.Registration, cfg.Auth.ApprovalRequired, cfg.Admin.Password, auditService)
 	previewService := service.NewPreviewService(physicalRepo, fileRepo, storageManager)
 	fileTagRepo := repository.NewFileTagRepository(db)
-	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService, fileTagRepo)
+	fileService := service.NewFileService(fileRepo, physicalRepo, storageManager, auditService, fileTagRepo, shareRepo)
 
 	// Initialize AI service
 	aiService := service.NewAIService(cfg.AI, physicalRepo, fileTagRepo, storageManager)
@@ -85,6 +85,7 @@ func main() {
 	shareHandler := handler.NewShareHandler(shareService, fileService)
 	storageHandler := handler.NewStorageHandler(physicalRepo, userRepo)
 	chatHandler := handler.NewChatHandler(ragService, fileService)
+	settingsHandler := handler.NewSettingsHandler()
 
 	// Setup Gin
 	r := gin.Default()
@@ -135,6 +136,19 @@ func main() {
 	// Request logging middleware
 	r.Use(middleware.Logger())
 
+	// Security headers middleware
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if cfg.TLS.Enabled {
+			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	})
+
 	// Health check (no auth required)
 	r.GET("/health", handler.HealthCheck)
 
@@ -166,68 +180,76 @@ func main() {
 		protected.POST("/auth/logout", authHandler.Logout)
 		protected.GET("/auth/profile", authHandler.GetProfile)
 
-		// Files
-		protected.GET("/files", fileHandler.ListFiles)
-		protected.GET("/files/search", fileHandler.SearchFiles)       // Must be before /files/:id
-		protected.GET("/files/download", fileHandler.BatchDownload)    // Must be before /:id routes
-		protected.GET("/files/lookup", fileHandler.LookupFile)
-		protected.GET("/files/:id", fileHandler.GetFile)
-		protected.GET("/files/:id/download", fileHandler.DownloadFile)
-		protected.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
-		protected.GET("/files/:id/metadata", previewHandler.GetMetadata)
-		protected.PUT("/files/:id", fileHandler.RenameFile)
-		protected.DELETE("/files/:id", fileHandler.DeleteFile)
-		protected.PATCH("/files/move", fileHandler.MoveFiles)
+		// All other protected routes require password change
+		needPwdChange := protected.Group("")
+		needPwdChange.Use(handler.PasswordChangeRequiredMiddleware())
+		{
+			// Files
+			needPwdChange.GET("/files", fileHandler.ListFiles)
+			needPwdChange.GET("/files/search", fileHandler.SearchFiles)       // Must be before /files/:id
+			needPwdChange.GET("/files/download", fileHandler.BatchDownload)    // Must be before /:id routes
+			needPwdChange.GET("/files/lookup", fileHandler.LookupFile)
+			needPwdChange.GET("/files/:id", fileHandler.GetFile)
+			needPwdChange.GET("/files/:id/download", fileHandler.DownloadFile)
+			needPwdChange.GET("/files/:id/preview", fileHandler.PreviewFile)
+			needPwdChange.GET("/files/:id/thumbnail", fileHandler.GetThumbnail)
+			needPwdChange.GET("/files/:id/metadata", previewHandler.GetMetadata)
+			needPwdChange.PUT("/files/:id", fileHandler.RenameFile)
+			needPwdChange.DELETE("/files/:id", fileHandler.DeleteFile)
+			needPwdChange.PATCH("/files/move", fileHandler.MoveFiles)
 
-		// AI Summary
-		protected.GET("/files/:id/ai-summary", fileHandler.GetAISummary)
-		protected.POST("/files/:id/ai-summary", fileHandler.RegenerateSummary)
+			// AI Summary
+			needPwdChange.GET("/files/:id/ai-summary", fileHandler.GetAISummary)
+			needPwdChange.POST("/files/:id/ai-summary", fileHandler.RegenerateSummary)
 
-		// Chat (RAG)
-		protected.POST("/chat/conversations", chatHandler.CreateConversation)
-		protected.GET("/chat/conversations", chatHandler.ListConversations)
-		protected.GET("/chat/conversations/:id", chatHandler.GetConversation)
-		protected.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
-		protected.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
-		protected.POST("/chat/conversations/:id/ask", chatHandler.Ask)
-		protected.GET("/chat/conversations/:id/ask", chatHandler.AskSSE)
+			// Chat (RAG)
+			needPwdChange.GET("/chat/available-files", chatHandler.ListAvailableFiles)
+			needPwdChange.POST("/chat/conversations", chatHandler.CreateConversation)
+			needPwdChange.GET("/chat/conversations", chatHandler.ListConversations)
+			needPwdChange.GET("/chat/conversations/:id", chatHandler.GetConversation)
+			needPwdChange.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
+			needPwdChange.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
+			needPwdChange.POST("/chat/conversations/:id/ask", chatHandler.Ask)
+			needPwdChange.GET("/chat/conversations/:id/ask", chatHandler.AskSSE)
 
-		// RAG reindex
-		protected.POST("/files/:id/reindex", chatHandler.ReindexFile)
+			// RAG reindex
+			needPwdChange.POST("/files/:id/reindex", chatHandler.ReindexFile)
 
-		// Folders
-		protected.POST("/folders", fileHandler.CreateFolder)
-		protected.GET("/folders/:id/download", fileHandler.DownloadFolder)
+			// Folders
+			needPwdChange.POST("/folders", fileHandler.CreateFolder)
+			needPwdChange.GET("/folders/tree", fileHandler.ListFolderTree)
+			needPwdChange.GET("/folders/:id/download", fileHandler.DownloadFolder)
 
-		// Trash
-		protected.GET("/trash", trashHandler.ListTrash)
-		protected.POST("/trash/:id/restore", trashHandler.RestoreFile)
-		protected.DELETE("/trash/:id", trashHandler.PermanentDelete)
-		protected.DELETE("/trash", trashHandler.EmptyTrash)
+			// Trash
+			needPwdChange.GET("/trash", trashHandler.ListTrash)
+			needPwdChange.POST("/trash/:id/restore", trashHandler.RestoreFile)
+			needPwdChange.DELETE("/trash/:id", trashHandler.PermanentDelete)
+			needPwdChange.DELETE("/trash", trashHandler.EmptyTrash)
 
-		// Clipboard
-		protected.GET("/clipboard", clipboardHandler.List)
-		protected.POST("/clipboard", clipboardHandler.Create)
-		protected.PATCH("/clipboard/:id/pin", clipboardHandler.UpdatePin)
-		protected.DELETE("/clipboard/:id", clipboardHandler.Delete)
-		protected.DELETE("/clipboard", clipboardHandler.Clear)
+			// Clipboard
+			needPwdChange.GET("/clipboard", clipboardHandler.List)
+			needPwdChange.POST("/clipboard", clipboardHandler.Create)
+			needPwdChange.PATCH("/clipboard/:id/pin", clipboardHandler.UpdatePin)
+			needPwdChange.DELETE("/clipboard/:id", clipboardHandler.Delete)
+			needPwdChange.DELETE("/clipboard", clipboardHandler.Clear)
 
-		// Upload
-		protected.POST("/upload/init", uploadHandler.InitUpload)
-		protected.PUT("/upload/:uploadID/chunk/:index", uploadHandler.UploadChunk)
-		protected.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
-		protected.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
-		protected.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
+			// Upload
+			needPwdChange.POST("/upload/init", uploadHandler.InitUpload)
+			needPwdChange.PUT("/upload/:uploadID/chunk/:index", uploadHandler.UploadChunk)
+			needPwdChange.GET("/upload/:uploadID/progress", uploadHandler.GetProgress)
+			needPwdChange.POST("/upload/:uploadID/complete", uploadHandler.CompleteUpload)
+			needPwdChange.DELETE("/upload/:uploadID", uploadHandler.CancelUpload)
 
-		// Shares
-		protected.POST("/shares", shareHandler.CreateShare)
-		protected.GET("/shares", shareHandler.ListFileShares)
-		protected.GET("/shares/mine", shareHandler.ListMyShares)
-		protected.DELETE("/shares/:id", shareHandler.RevokeShare)
+			// Shares
+			needPwdChange.POST("/shares", shareHandler.CreateShare)
+			needPwdChange.GET("/shares", shareHandler.ListFileShares)
+			needPwdChange.GET("/shares/mine", shareHandler.ListMyShares)
+			needPwdChange.DELETE("/shares/:id", shareHandler.RevokeShare)
 
-		// Storage
-		protected.GET("/storage/usage", storageHandler.GetUsage)
+			// Storage
+			needPwdChange.GET("/storage/usage", storageHandler.GetUsage)
 		}
+	}
 
 	// Admin routes
 	admin := api.Group("/admin")
@@ -240,6 +262,8 @@ func main() {
 		admin.PUT("/users/:id/quota", adminHandler.UpdateUserQuota)
 		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 		admin.GET("/audit-logs", adminHandler.ListAuditLogs)
+		admin.GET("/settings", settingsHandler.GetSettings)
+		admin.PUT("/settings", settingsHandler.UpdateSettings)
 	}
 
 	// WebDAV routes — register all WebDAV methods explicitly

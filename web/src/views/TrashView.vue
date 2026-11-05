@@ -92,7 +92,6 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
 import { trashAPI } from '@/utils/api'
 import { formatDate } from '@/utils/format'
 import AppHeader from '@/components/Layout/AppHeader.vue'
@@ -100,19 +99,12 @@ import AppSidebar from '@/components/Layout/AppSidebar.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const route = useRoute()
 const trashFiles = ref([])
 const selectedFiles = ref([])
 const showEmptyConfirm = ref(false)
 const loading = ref(false)
 
 onMounted(() => {
-  fetchTrash()
-})
-
-// Reload data when route changes (e.g., when navigating to /trash)
-import { onBeforeRouteUpdate } from 'vue-router'
-onBeforeRouteUpdate(() => {
   fetchTrash()
 })
 

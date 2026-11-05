@@ -121,15 +121,34 @@ func (s *AdminService) UpdateUser(ctx context.Context, adminID, userID int64, ro
 	}
 
 	if role != "" {
+		if role != "admin" && role != "user" {
+			return fmt.Errorf("invalid role: %s", role)
+		}
 		if err := s.userRepo.UpdateRole(ctx, userID, role); err != nil {
+			return err
+		}
+		// Invalidate existing tokens since role changed
+		if err := s.userRepo.IncrementTokenVersion(ctx, userID); err != nil {
 			return err
 		}
 	}
 	if status != "" {
+		validStatuses := map[string]bool{
+			model.UserStatusPending:  true,
+			model.UserStatusApproved: true,
+			model.UserStatusDisabled: true,
+		}
+		if !validStatuses[status] {
+			return fmt.Errorf("invalid status: %s", status)
+		}
 		if err := s.userRepo.UpdateStatus(ctx, userID, status); err != nil {
 			return err
 		}
 		s.audit.Record(ctx, "admin.update_status", "user", userID, "", fmt.Sprintf(`{"status":"%s"}`, status))
+		// Invalidate existing tokens since status changed
+		if err := s.userRepo.IncrementTokenVersion(ctx, userID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -146,6 +165,11 @@ func (s *AdminService) ResetPassword(ctx context.Context, userID int64, newPassw
 
 	// Force password change on next login
 	if err := s.userRepo.UpdatePasswordChanged(ctx, userID, false); err != nil {
+		return err
+	}
+
+	// Invalidate all existing tokens
+	if err := s.userRepo.IncrementTokenVersion(ctx, userID); err != nil {
 		return err
 	}
 

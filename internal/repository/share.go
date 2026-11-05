@@ -43,9 +43,29 @@ func (r *ShareRepository) FindByFile(ctx context.Context, fileID int64) ([]model
 	return shares, nil
 }
 
+func (r *ShareRepository) FindByFileIDs(ctx context.Context, fileIDs []int64) ([]model.FileShare, error) {
+	if len(fileIDs) == 0 {
+		return nil, nil
+	}
+	var shares []model.FileShare
+	if err := r.db.WithContext(ctx).Where("file_id IN ?", fileIDs).Find(&shares).Error; err != nil {
+		return nil, err
+	}
+	return shares, nil
+}
+
 func (r *ShareRepository) Revoke(ctx context.Context, id, ownerID int64) error {
 	return r.db.WithContext(ctx).Model(&model.FileShare{}).
 		Where("id = ? AND owner_id = ?", id, ownerID).
+		Update("revoked", true).Error
+}
+
+func (r *ShareRepository) RevokeByFileIDs(ctx context.Context, fileIDs []int64) error {
+	if len(fileIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&model.FileShare{}).
+		Where("file_id IN ?", fileIDs).
 		Update("revoked", true).Error
 }
 

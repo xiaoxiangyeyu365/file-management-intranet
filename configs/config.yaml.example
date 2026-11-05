@@ -7,7 +7,7 @@ database:
   host: "localhost"
   port: 3306
   username: "root"
-  password: "1234"
+  password: ""            # REQUIRED: Set your MySQL password
   name: "cloudbox"
 
 storage:
@@ -21,7 +21,7 @@ upload:
   temp_expire: 24h
 
 jwt:
-  secret: "change-this-in-production"
+  secret: ""              # REQUIRED: Set a strong random secret (32+ bytes) or use JWT_SECRET env var
   expire: 24h
 
 log:
@@ -30,7 +30,7 @@ log:
 
 admin:
   username: "admin"
-  password: "admin123"
+  password: ""            # REQUIRED: Set a strong admin password (change on first login)
 
 auth:
   registration: true        # 是否允许公开注册

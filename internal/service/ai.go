@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -201,8 +202,9 @@ func (s *AIService) generateSummary(ctx context.Context, pf *model.PhysicalFile,
 		response, err = visionClient.ChatCompletionWithImage(ctx, s.cfg.SummaryPrompt, content, mimeType)
 	} else {
 		prompt := s.cfg.SummaryPrompt + "\n\n" + content
-		if len(prompt) > s.cfg.MaxContentLength {
-			prompt = prompt[:s.cfg.MaxContentLength]
+		runes := []rune(prompt)
+		if len(runes) > s.cfg.MaxContentLength {
+			prompt = string(runes[:s.cfg.MaxContentLength])
 		}
 		response, err = s.client.ChatCompletion(ctx, prompt, false)
 	}
@@ -299,7 +301,9 @@ func parseAIResponse(input string) (string, []string) {
 
 	var tags []string
 	if tm != nil {
-		for _, t := range strings.Split(tm[1], ",") {
+		// Split on ASCII comma, Chinese enumeration comma (、), and full-width comma (，)
+		tagSplit := regexp.MustCompile(`[,，、]`)
+		for _, t := range tagSplit.Split(tm[1], -1) {
 			t = strings.TrimSpace(t)
 			if t != "" {
 				tags = append(tags, t)
@@ -357,10 +361,10 @@ func extractDOCXText(path string) (string, error) {
 				return "", err
 			}
 
-			// Extract text between <w:t> tags
+			// Extract text between <w:t> and <w:t xml:space="preserve"> tags
 			content := string(data)
 			var buf strings.Builder
-			re := regexp.MustCompile(`>([^<]+)<`)
+			re := regexp.MustCompile(`(?s)<w:t[^>]*>([^<]*)</w:t>`)
 			for _, match := range re.FindAllStringSubmatch(content, -1) {
 				text := strings.TrimSpace(match[1])
 				if text != "" {
@@ -413,15 +417,7 @@ func extractPDFText(path string) (string, error) {
 }
 
 func isValidUTF8(data []byte) bool {
-	for i := 0; i < len(data); i++ {
-		if data[i] > 127 {
-			if data[i]&0xC0 == 0xC0 || data[i]&0xC0 == 0x80 {
-				continue
-			}
-			return false
-		}
-	}
-	return true
+	return utf8.Valid(data)
 }
 
 func decodeGBK(data []byte) (string, error) {

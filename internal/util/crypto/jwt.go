@@ -10,19 +10,23 @@ import (
 )
 
 type Claims struct {
-	UserID   int64  `json:"userId"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID          int64  `json:"userId"`
+	Username        string `json:"username"`
+	Role            string `json:"role"`
+	TokenVersion    int64  `json:"tokenVersion"`
+	PasswordChanged bool   `json:"pwdChanged"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID int64, username, role string) (string, error) {
+func GenerateToken(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 	cfg := config.Get()
 
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
+		UserID:          userID,
+		Username:        username,
+		Role:            role,
+		TokenVersion:    tokenVersion,
+		PasswordChanged: pwdChanged,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(cfg.JWT.Expire)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

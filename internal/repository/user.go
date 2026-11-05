@@ -89,3 +89,9 @@ func (r *UserRepository) SetQuota(ctx context.Context, userID int64, quota *int6
 		Where("id = ?", userID).
 		Update("disk_quota", quota).Error
 }
+
+func (r *UserRepository) IncrementTokenVersion(ctx context.Context, userID int64) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("token_version", gorm.Expr("token_version + 1")).Error
+}

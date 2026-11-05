@@ -261,6 +261,30 @@ func Load() *Config {
 			log.Println("WARNING: JWT_SECRET not set, using random key (not suitable for production)")
 			cfg.JWT.Secret = generateRandomKey()
 		}
+		if cfg.Admin.Password == "admin123" {
+			log.Println("WARNING: admin.password is set to default 'admin123'. Please change it immediately!")
+		}
+
+		// Check for weak/placeholder JWT secrets
+		weakSecrets := []string{
+			"change-this-in-production",
+			"change-me",
+			"secret",
+			"changeme",
+			"your-secret-key",
+			"your-secret",
+			"jwt-secret",
+			"test-secret",
+			"dev-secret",
+		}
+		for _, weak := range weakSecrets {
+			if cfg.JWT.Secret == weak {
+				log.Fatalf("FATAL: jwt.secret is set to weak placeholder value %q. Please set a strong random secret (at least 32 bytes) via config or JWT_SECRET env var", weak)
+			}
+		}
+		if len(cfg.JWT.Secret) < 32 {
+			log.Fatalf("FATAL: jwt.secret is too short (%d bytes). Please set a strong random secret of at least 32 bytes", len(cfg.JWT.Secret))
+		}
 
 		if cfg.Share.Secret == "" {
 			cfg.Share.Secret = generateRandomSecret()

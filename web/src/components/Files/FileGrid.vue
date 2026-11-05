@@ -5,7 +5,7 @@
       :key="file.id"
       class="file-card"
       :class="{ selected: selectedIds.includes(file.id) }"
-      @click="handleClick(file)"
+      @click="handleClick(file, $event)"
       @dblclick="handleDoubleClick(file)"
       @contextmenu.prevent="showContextMenu($event, file)"
     >
@@ -81,7 +81,12 @@ const contextMenuPos = ref({ x: 0, y: 0 })
 
 function showContextMenu(event, file) {
   contextMenuFile.value = file
-  contextMenuPos.value = { x: event.clientX, y: event.clientY }
+  // Clamp position to viewport bounds
+  const menuWidth = 160
+  const menuHeight = 200
+  const x = Math.max(0, Math.min(event.clientX, window.innerWidth - menuWidth))
+  const y = Math.max(0, Math.min(event.clientY, window.innerHeight - menuHeight))
+  contextMenuPos.value = { x, y }
   contextMenuVisible.value = true
 }
 
@@ -145,7 +150,13 @@ function getFileIcon(file) {
   return '📄'
 }
 
-function handleClick(file) {
+function handleClick(file, event) {
+  if (event && event.shiftKey) {
+    // Shift+Click: range select
+    filesStore.selectRange(props.files, file.id)
+    return
+  }
+  // Toggle selection (Ctrl+Click equivalent)
   const newSelected = selectedIds.value.includes(file.id)
     ? selectedIds.value.filter(id => id !== file.id)
     : [...selectedIds.value, file.id]

@@ -60,6 +60,12 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
+    path: '/admin/settings',
+    name: 'AdminSettings',
+    component: () => import('../views/AdminSettingsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
     path: '/chat',
     name: 'Chat',
     component: ChatView,
@@ -82,6 +88,11 @@ const routes = [
     name: 'Shares',
     component: () => import('../views/SharesView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('../views/NotFoundView.vue')
   }
 ]
 

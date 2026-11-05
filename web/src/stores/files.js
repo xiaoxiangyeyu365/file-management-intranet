@@ -6,6 +6,7 @@ export const useFilesStore = defineStore('files', {
     files: [],
     currentFolder: 0,
     selectedIds: [],
+    lastSelectedId: null,
     viewMode: localStorage.getItem('cloudbox_viewMode') || 'grid',
     loading: false,
     searchKeyword: '',
@@ -14,55 +15,67 @@ export const useFilesStore = defineStore('files', {
     searchResults: [],
     isSearching: false,
     path: [{ id: 0, name: '根目录' }],
-    sortBy: 'name',
-    sortOrder: 'asc'
+    sortBy: ['name', 'size', 'updatedAt'].includes(localStorage.getItem('cloudbox_sortBy'))
+      ? localStorage.getItem('cloudbox_sortBy')
+      : 'name',
+    sortOrder: localStorage.getItem('cloudbox_sortOrder') === 'desc' ? 'desc' : 'asc',
+    // Pagination
+    pagination: {
+      enabled: false,
+      page: 1,
+      pageSize: 50,
+      total: 0
+    }
   }),
 
   getters: {
     folders: (state) => state.files.filter(f => f.isFolder),
     filesOnly: (state) => state.files.filter(f => !f.isFolder),
-    sortedFiles: (state) => {
-      const folders = state.files.filter(f => f.isFolder)
-      const filesOnly = state.files.filter(f => !f.isFolder)
-
-      const sortFn = (a, b) => {
-        let cmp = 0
-        if (state.sortBy === 'name') {
-          cmp = a.name.localeCompare(b.name)
-        } else if (state.sortBy === 'size') {
-          cmp = (a.physical?.size ?? 0) - (b.physical?.size ?? 0)
-        } else if (state.sortBy === 'updatedAt') {
-          cmp = (a.updatedAt || '').localeCompare(b.updatedAt || '')
-        }
-        return state.sortOrder === 'asc' ? cmp : -cmp
-      }
-
-      return [...folders.sort(sortFn), ...filesOnly.sort(sortFn)]
-    }
+    // The server returns rows already ordered by the active sort (folders
+    // first). Sorting here would only reorder the current page and disagree
+    // with server-side pagination, so this is intentionally a pass-through.
+    sortedFiles: (state) => state.files
   },
 
   actions: {
     async fetchFiles(folderId = 0) {
       this.loading = true
       try {
-        console.log('fetchFiles called with folderId:', folderId)
-        const response = await fileAPI.list(folderId)
-        console.log('fetchFiles response:', response)
-        // Backend returns {code:0, data:{files:[]}}
+        const response = await fileAPI.listPaged(folderId, 1, this.pagination.pageSize, this.sortBy, this.sortOrder)
         const data = response?.data || response
-        console.log('fetchFiles data:', data)
         this.files = data.files || []
         this.currentFolder = folderId
         this.selectedIds = []
         this.searchKeyword = ''
         this.searchResults = []
         this.isSearching = false
-        this.sortBy = 'name'
-        this.sortOrder = 'asc'
+        this.pagination = {
+          enabled: true,
+          page: data.page || 1,
+          pageSize: this.pagination.pageSize,
+          total: data.total || 0
+        }
       } catch (err) {
         console.error('fetchFiles error:', err)
       } finally {
         this.loading = false
+      }
+    },
+
+    async fetchPage(page, options = {}) {
+      if (!options.silent) this.loading = true
+      try {
+        const response = await fileAPI.listPaged(this.currentFolder, page, this.pagination.pageSize, this.sortBy, this.sortOrder)
+        const data = response?.data || response
+        this.files = data.files || []
+        if (!options.keepSelection) this.selectedIds = []
+        this.pagination.page = data.page || page
+        this.pagination.total = data.total || 0
+        this.pagination.enabled = true
+      } catch (err) {
+        console.error('fetchPage error:', err)
+      } finally {
+        if (!options.silent) this.loading = false
       }
     },
 
@@ -92,7 +105,8 @@ export const useFilesStore = defineStore('files', {
       const response = await folderAPI.create(parentId, name)
       const data = response?.data || response
       if (parentId === this.currentFolder) {
-        this.files.push(data)
+        // Keep server-side ordering intact instead of appending to the page.
+        await this.fetchPage(this.pagination.page, { silent: true })
       }
       return data
     },
@@ -113,6 +127,10 @@ export const useFilesStore = defineStore('files', {
       if (file) file.name = newName
       const searchFile = this.searchResults.find(f => f.id === fileId)
       if (searchFile) searchFile.name = newName
+      // Name is a sort key; re-fetch so the row moves to its new position.
+      if (!this.isSearching) {
+        await this.fetchPage(this.pagination.page, { silent: true, keepSelection: true })
+      }
     },
 
     async deleteFile(fileId) {
@@ -120,12 +138,18 @@ export const useFilesStore = defineStore('files', {
       this.files = this.files.filter(f => f.id !== fileId)
       this.searchResults = this.searchResults.filter(f => f.id !== fileId)
       this.selectedIds = this.selectedIds.filter(id => id !== fileId)
+      if (this.lastSelectedId === fileId) this.lastSelectedId = null
+      if (this.pagination.enabled) {
+        this.pagination.total = Math.max(0, this.pagination.total - 1)
+      }
+      this.notifyStorageChanged()
     },
 
     async moveFiles(fileIds, targetFolderId) {
       await fileAPI.move(fileIds, targetFolderId)
       this.files = this.files.filter(f => !fileIds.includes(f.id))
-      this.selectedIds = []
+      this.selectedIds = this.selectedIds.filter(id => !fileIds.includes(id))
+      if (fileIds.includes(this.lastSelectedId)) this.lastSelectedId = null
       if (targetFolderId === this.currentFolder) {
         await this.fetchFiles(this.currentFolder)
       }
@@ -133,7 +157,6 @@ export const useFilesStore = defineStore('files', {
 
     async downloadFile(fileId) {
       const token = localStorage.getItem('cloudbox_token')
-      console.log('Download - token from localStorage:', token ? 'exists (' + token.length + ' chars)' : 'NULL')
       if (!token) {
         console.error('No token found, please login first')
         return
@@ -147,41 +170,11 @@ export const useFilesStore = defineStore('files', {
 
     async downloadFolder(folderId) {
       const token = localStorage.getItem('cloudbox_token')
-      const url = folderAPI.downloadUrl(folderId)
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      const contentType = response.headers.get('content-type')
-
-      // Check if response is an error JSON
-      if (contentType && contentType.includes('application/json')) {
-        const data = await response.json()
-        if (data.code !== 0) {
-          console.error('Download failed:', data.message)
-          return
-        }
-      }
-
-      if (response.ok) {
-        const blob = await response.blob()
-        const disposition = response.headers.get('Content-Disposition')
-        let filename = `folder-${folderId}.zip`
-        if (disposition) {
-          // RFC 5987 format: filename*=UTF-8''name
-          const parts = disposition.split("'")
-          if (parts.length >= 3) {
-            filename = decodeURIComponent(parts[2])
-          } else {
-            const match = disposition.match(/filename="?([^;"']+)/)
-            if (match) filename = match[1]
-          }
-        }
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(blob)
-        a.download = filename
-        a.click()
-        URL.revokeObjectURL(a.href)
-      }
+      if (!token) return
+      // Use window.open to stream download — avoids loading entire ZIP into browser memory
+      const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+      const downloadUrl = `${baseURL}/folders/${folderId}/download?token=${encodeURIComponent(token)}`
+      window.open(downloadUrl, '_blank')
     },
 
     async batchDownload() {
@@ -192,43 +185,10 @@ export const useFilesStore = defineStore('files', {
       }
 
       const ids = this.selectedIds.join(',')
-      const url = `/api/files/download?ids=${ids}`
-      try {
-        const response = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-
-        const contentType = response.headers.get('content-type')
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json()
-          if (data.code !== 0) {
-            console.error('Batch download failed:', data.message)
-            return
-          }
-        }
-
-        if (response.ok) {
-          const blob = await response.blob()
-          const disposition = response.headers.get('Content-Disposition')
-          let filename = 'downloads.zip'
-          if (disposition) {
-            const parts = disposition.split("'")
-            if (parts.length >= 3) {
-              filename = decodeURIComponent(parts[2])
-            } else {
-              const match = disposition.match(/filename="?([^;"']+)/)
-              if (match) filename = match[1]
-            }
-          }
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = filename
-          a.click()
-          URL.revokeObjectURL(a.href)
-        }
-      } catch (err) {
-        console.error('Batch download error:', err)
-      }
+      // Use window.open to stream download — avoids loading entire ZIP into browser memory
+      const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+      const downloadUrl = `${baseURL}/files/download?ids=${ids}&token=${encodeURIComponent(token)}`
+      window.open(downloadUrl, '_blank')
     },
 
     toggleViewMode() {
@@ -238,11 +198,56 @@ export const useFilesStore = defineStore('files', {
 
     setSelected(ids) {
       this.selectedIds = ids
+      if (ids.length > 0) {
+        this.lastSelectedId = ids[ids.length - 1]
+      } else {
+        this.lastSelectedId = null
+      }
+    },
+
+    // Select a range between the last selected file and the target file
+    selectRange(allFiles, targetId) {
+      if (!this.lastSelectedId) {
+        // No anchor, just toggle
+        this.toggleSelect(targetId)
+        return
+      }
+      const ids = allFiles.map(f => f.id)
+      const anchorIdx = ids.indexOf(this.lastSelectedId)
+      const targetIdx = ids.indexOf(targetId)
+      if (anchorIdx === -1 || targetIdx === -1) {
+        this.toggleSelect(targetId)
+        return
+      }
+      const start = Math.min(anchorIdx, targetIdx)
+      const end = Math.max(anchorIdx, targetIdx)
+      const rangeIds = ids.slice(start, end + 1)
+      // Add range to current selection
+      const merged = new Set([...this.selectedIds, ...rangeIds])
+      this.selectedIds = [...merged]
+    },
+
+    toggleSelect(id) {
+      const idx = this.selectedIds.indexOf(id)
+      if (idx >= 0) {
+        this.selectedIds = this.selectedIds.filter(i => i !== id)
+      } else {
+        this.selectedIds.push(id)
+      }
+      this.lastSelectedId = id
     },
 
     setSort(sortBy, sortOrder) {
+      if (this.sortBy === sortBy && this.sortOrder === sortOrder) return
       this.sortBy = sortBy
       this.sortOrder = sortOrder
+      localStorage.setItem('cloudbox_sortBy', sortBy)
+      localStorage.setItem('cloudbox_sortOrder', sortOrder)
+      this.pagination.page = 1
+      // Server-side ordering is the source of truth, so refetch the first page.
+      if (!this.isSearching) {
+        this.fetchPage(1, { silent: true })
+      }
     },
 
     updatePath(path) {
@@ -257,11 +262,17 @@ export const useFilesStore = defineStore('files', {
       } else {
         this.path.push({ id: folder.id, name: folder.name })
       }
+      this.pagination.page = 1
     },
 
     async navigateToRoot() {
       await this.fetchFiles(0)
       this.path = [{ id: 0, name: '根目录' }]
+    },
+
+    // Notify sidebar to refresh storage usage display
+    notifyStorageChanged() {
+      window.dispatchEvent(new Event('cloudbox:storage-changed'))
     }
   }
 })

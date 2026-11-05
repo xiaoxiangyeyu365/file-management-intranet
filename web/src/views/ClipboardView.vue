@@ -96,16 +96,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useClipboardStore } from '@/stores/clipboard'
-import { useAuthStore } from '@/stores/auth'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 
 const clipboardStore = useClipboardStore()
-const authStore = useAuthStore()
 
 const inputContent = ref('')
 const saving = ref(false)
@@ -114,10 +112,6 @@ const recordsSectionRef = ref(null)
 let scrollTop = 0
 
 const DEVICE_NAME_KEY = 'cloudbox_device_name'
-
-function getDeviceNameKey() {
-  return DEVICE_NAME_KEY
-}
 
 onMounted(async () => {
   // Load device name from localStorage

@@ -10,7 +10,8 @@ type FileRepository interface {
 	Create(ctx context.Context, file *model.File) error
 	FindByID(ctx context.Context, id int64) (*model.File, error)
 	FindByIDAndOwner(ctx context.Context, id, ownerID int64) (*model.File, error)
-	FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool) ([]model.File, error)
+	FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error)
+	FindByParentAndOwnerPaged(ctx context.Context, parentID, ownerID int64, page, pageSize int, sortBy, sortOrder string) ([]model.File, int64, error)
 	FindByNameAndParent(ctx context.Context, ownerID, parentID int64, name string) (*model.File, error)
 	ExistsByName(ctx context.Context, ownerID, parentID int64, name string) bool
 	Update(ctx context.Context, file *model.File) error
@@ -22,6 +23,7 @@ type FileRepository interface {
 	BatchUpdateParent(ctx context.Context, fileIDs []int64, newParentID int64) error
 	IsAncestor(ctx context.Context, fileID, targetID int64) (bool, error)
 	Search(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error)
+	FindAllByOwner(ctx context.Context, ownerID int64) ([]model.File, error)
 }
 
 type PhysicalFileRepository interface {
@@ -42,8 +44,10 @@ type UserRepository interface {
 	FindByUsername(ctx context.Context, username string) (*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	UpdatePassword(ctx context.Context, userID int64, passwordHash string) error
+	UpdatePasswordChanged(ctx context.Context, userID int64, changed bool) error
 	GetQuota(ctx context.Context, userID int64) (*int64, error)
 	SetQuota(ctx context.Context, userID int64, quota *int64) error
+	IncrementTokenVersion(ctx context.Context, userID int64) error
 }
 
 type Storage interface {
@@ -60,7 +64,7 @@ type PasswordHasher interface {
 }
 
 type TokenGenerator interface {
-	GenerateToken(userID int64, username, role string) (string, error)
+	GenerateToken(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error)
 }
 
 type ImageProcessor interface {
@@ -72,7 +76,9 @@ type ShareRepository interface {
 	FindByToken(ctx context.Context, token string) (*model.FileShare, error)
 	FindByOwner(ctx context.Context, ownerID int64) ([]model.FileShare, error)
 	FindByFile(ctx context.Context, fileID int64) ([]model.FileShare, error)
+	FindByFileIDs(ctx context.Context, fileIDs []int64) ([]model.FileShare, error)
 	Revoke(ctx context.Context, id, ownerID int64) error
+	RevokeByFileIDs(ctx context.Context, fileIDs []int64) error
 	IncrementDownloadCount(ctx context.Context, token string) (bool, error)
 }
 

@@ -15,7 +15,8 @@ type mockFileRepo struct {
 	createFn              func(ctx context.Context, file *model.File) error
 	findByIDFn            func(ctx context.Context, id int64) (*model.File, error)
 	findByIDAndOwnerFn    func(ctx context.Context, id, ownerID int64) (*model.File, error)
-	findByParentAndOwnerFn func(ctx context.Context, parentID, ownerID int64, includeDeleted bool) ([]model.File, error)
+	findByParentAndOwnerFn func(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error)
+	findByParentAndOwnerPagedFn func(ctx context.Context, parentID, ownerID int64, page, pageSize int, sortBy, sortOrder string) ([]model.File, int64, error)
 	findByNameAndParentFn func(ctx context.Context, ownerID, parentID int64, name string) (*model.File, error)
 	existsByNameFn        func(ctx context.Context, ownerID, parentID int64, name string) bool
 	updateFn              func(ctx context.Context, file *model.File) error
@@ -27,6 +28,7 @@ type mockFileRepo struct {
 	batchUpdateParentFn   func(ctx context.Context, fileIDs []int64, newParentID int64) error
 	isAncestorFn          func(ctx context.Context, fileID, targetID int64) (bool, error)
 	searchFn              func(ctx context.Context, userID int64, keyword string, folderID *int64, sort string) ([]model.File, error)
+	findAllByOwnerFn      func(ctx context.Context, ownerID int64) ([]model.File, error)
 }
 
 func (m *mockFileRepo) Create(ctx context.Context, file *model.File) error {
@@ -47,11 +49,17 @@ func (m *mockFileRepo) FindByIDAndOwner(ctx context.Context, id, ownerID int64) 
 	}
 	return m.findByIDAndOwnerFn(ctx, id, ownerID)
 }
-func (m *mockFileRepo) FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool) ([]model.File, error) {
+func (m *mockFileRepo) FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error) {
 	if m.findByParentAndOwnerFn == nil {
 		panic("mockFileRepo.FindByParentAndOwner not set")
 	}
-	return m.findByParentAndOwnerFn(ctx, parentID, ownerID, includeDeleted)
+	return m.findByParentAndOwnerFn(ctx, parentID, ownerID, includeDeleted, sortBy, sortOrder)
+}
+func (m *mockFileRepo) FindByParentAndOwnerPaged(ctx context.Context, parentID, ownerID int64, page, pageSize int, sortBy, sortOrder string) ([]model.File, int64, error) {
+	if m.findByParentAndOwnerPagedFn == nil {
+		return nil, 0, nil
+	}
+	return m.findByParentAndOwnerPagedFn(ctx, parentID, ownerID, page, pageSize, sortBy, sortOrder)
 }
 func (m *mockFileRepo) FindByNameAndParent(ctx context.Context, ownerID, parentID int64, name string) (*model.File, error) {
 	if m.findByNameAndParentFn == nil {
@@ -118,6 +126,12 @@ func (m *mockFileRepo) Search(ctx context.Context, userID int64, keyword string,
 		panic("mockFileRepo.Search not set")
 	}
 	return m.searchFn(ctx, userID, keyword, folderID, sort)
+}
+func (m *mockFileRepo) FindAllByOwner(ctx context.Context, ownerID int64) ([]model.File, error) {
+	if m.findAllByOwnerFn == nil {
+		panic("mockFileRepo.FindAllByOwner not set")
+	}
+	return m.findAllByOwnerFn(ctx, ownerID)
 }
 
 type mockPhysicalFileRepo struct {
@@ -195,12 +209,14 @@ func (m *mockPhysicalFileRepo) CalculateAllUserStorageUsage(ctx context.Context)
 }
 
 type mockUserRepo struct {
-	findByIDFn       func(ctx context.Context, id int64) (*model.User, error)
-	findByUsernameFn func(ctx context.Context, username string) (*model.User, error)
-	createFn         func(ctx context.Context, user *model.User) error
-	updatePasswordFn func(ctx context.Context, userID int64, passwordHash string) error
-	getQuotaFn       func(ctx context.Context, userID int64) (*int64, error)
-	setQuotaFn       func(ctx context.Context, userID int64, quota *int64) error
+	findByIDFn              func(ctx context.Context, id int64) (*model.User, error)
+	findByUsernameFn        func(ctx context.Context, username string) (*model.User, error)
+	createFn                func(ctx context.Context, user *model.User) error
+	updatePasswordFn        func(ctx context.Context, userID int64, passwordHash string) error
+	updatePasswordChangedFn func(ctx context.Context, userID int64, changed bool) error
+	getQuotaFn              func(ctx context.Context, userID int64) (*int64, error)
+	setQuotaFn              func(ctx context.Context, userID int64, quota *int64) error
+	incrementTokenVersionFn func(ctx context.Context, userID int64) error
 }
 
 func (m *mockUserRepo) FindByID(ctx context.Context, id int64) (*model.User, error) {
@@ -227,6 +243,12 @@ func (m *mockUserRepo) UpdatePassword(ctx context.Context, userID int64, passwor
 	}
 	return m.updatePasswordFn(ctx, userID, passwordHash)
 }
+func (m *mockUserRepo) UpdatePasswordChanged(ctx context.Context, userID int64, changed bool) error {
+	if m.updatePasswordChangedFn == nil {
+		return nil
+	}
+	return m.updatePasswordChangedFn(ctx, userID, changed)
+}
 func (m *mockUserRepo) GetQuota(ctx context.Context, userID int64) (*int64, error) {
 	if m.getQuotaFn == nil {
 		return nil, nil
@@ -238,6 +260,12 @@ func (m *mockUserRepo) SetQuota(ctx context.Context, userID int64, quota *int64)
 		return nil
 	}
 	return m.setQuotaFn(ctx, userID, quota)
+}
+func (m *mockUserRepo) IncrementTokenVersion(ctx context.Context, userID int64) error {
+	if m.incrementTokenVersionFn == nil {
+		return nil
+	}
+	return m.incrementTokenVersionFn(ctx, userID)
 }
 
 type mockStorage struct {
@@ -298,14 +326,14 @@ func (m *mockPasswordHasher) CheckPassword(password, hash string) bool {
 }
 
 type mockTokenGenerator struct {
-	generateTokenFn func(userID int64, username, role string) (string, error)
+	generateTokenFn func(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error)
 }
 
-func (m *mockTokenGenerator) GenerateToken(userID int64, username, role string) (string, error) {
+func (m *mockTokenGenerator) GenerateToken(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 	if m.generateTokenFn == nil {
 		panic("mockTokenGenerator.GenerateToken not set")
 	}
-	return m.generateTokenFn(userID, username, role)
+	return m.generateTokenFn(userID, username, role, tokenVersion, pwdChanged)
 }
 
 type mockShareRepo struct {
@@ -313,7 +341,9 @@ type mockShareRepo struct {
 	findByTokenFn            func(ctx context.Context, token string) (*model.FileShare, error)
 	findByOwnerFn            func(ctx context.Context, ownerID int64) ([]model.FileShare, error)
 	findByFileFn             func(ctx context.Context, fileID int64) ([]model.FileShare, error)
+	findByFileIDsFn          func(ctx context.Context, fileIDs []int64) ([]model.FileShare, error)
 	revokeFn                 func(ctx context.Context, id, ownerID int64) error
+	revokeByFileIDsFn        func(ctx context.Context, fileIDs []int64) error
 	incrementDownloadCountFn func(ctx context.Context, token string) (bool, error)
 }
 
@@ -341,11 +371,23 @@ func (m *mockShareRepo) FindByFile(ctx context.Context, fileID int64) ([]model.F
 	}
 	return m.findByFileFn(ctx, fileID)
 }
+func (m *mockShareRepo) FindByFileIDs(ctx context.Context, fileIDs []int64) ([]model.FileShare, error) {
+	if m.findByFileIDsFn == nil {
+		return nil, nil
+	}
+	return m.findByFileIDsFn(ctx, fileIDs)
+}
 func (m *mockShareRepo) Revoke(ctx context.Context, id, ownerID int64) error {
 	if m.revokeFn == nil {
 		panic("mockShareRepo.Revoke not set")
 	}
 	return m.revokeFn(ctx, id, ownerID)
+}
+func (m *mockShareRepo) RevokeByFileIDs(ctx context.Context, fileIDs []int64) error {
+	if m.revokeByFileIDsFn == nil {
+		return nil
+	}
+	return m.revokeByFileIDsFn(ctx, fileIDs)
 }
 func (m *mockShareRepo) IncrementDownloadCount(ctx context.Context, token string) (bool, error) {
 	if m.incrementDownloadCountFn == nil {

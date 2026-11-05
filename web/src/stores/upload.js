@@ -139,7 +139,7 @@ export const useUploadStore = defineStore('upload', {
 
         try {
           await ElMessageBox.confirm(
-            `文件 "${task.name}" 已存在。\n\n请选择操作：\n• 覆盖：将重新上传并替换现有文件\n• 跳过：取消本次上传\n• 重命名：自动添加数字后缀上传`,
+            `文件 "${task.name}" 已存在。\n\n请选择操作：\n• 覆盖：将重新上传并替换现有文件\n• 跳过：取消本次上传`,
             '文件已存在',
             {
               confirmButtonText: '覆盖',
@@ -174,6 +174,7 @@ export const useUploadStore = defineStore('upload', {
           task.status = 'completed'
           task.progress = 100
           this.refreshFiles()
+          this.notifyStorageChanged()
           return
         }
 
@@ -229,6 +230,7 @@ export const useUploadStore = defineStore('upload', {
         task.status = 'completed'
         task.progress = 100
         this.refreshFiles()
+        this.notifyStorageChanged()
       }
     },
 
@@ -250,7 +252,12 @@ export const useUploadStore = defineStore('upload', {
       task.status = 'hashing'
       task.error = null
       task.progress = 0
-      this.worker.postMessage({ taskId: task.id, file: task.file })
+      // Check worker availability, fall back to main thread
+      if (this.worker) {
+        this.worker.postMessage({ taskId: task.id, file: task.file })
+      } else {
+        this.calculateMD5MainThread(task, task.file)
+      }
     },
 
     removeTask(taskId) {
@@ -267,8 +274,15 @@ export const useUploadStore = defineStore('upload', {
     },
 
     refreshFiles() {
-      const filesStore = useFilesStore()
-      filesStore.fetchFiles(filesStore.currentFolder)
+      if (this._refreshTimer) clearTimeout(this._refreshTimer)
+      this._refreshTimer = setTimeout(() => {
+        const filesStore = useFilesStore()
+        filesStore.fetchFiles(filesStore.currentFolder)
+      }, 300)
+    },
+
+    notifyStorageChanged() {
+      window.dispatchEvent(new Event('cloudbox:storage-changed'))
     }
   }
 })

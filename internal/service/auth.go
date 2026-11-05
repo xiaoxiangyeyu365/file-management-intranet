@@ -121,7 +121,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 		requireChange = true
 	}
 
-	token, err := s.tokenGen.GenerateToken(user.ID, user.Username, user.Role)
+	token, err := s.tokenGen.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion, !requireChange)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +154,16 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPwd, 
 	}
 
 	if err := s.userRepo.UpdatePassword(ctx, userID, newHash); err != nil {
+		return err
+	}
+
+	// Mark password as changed
+	if err := s.userRepo.UpdatePasswordChanged(ctx, userID, true); err != nil {
+		return err
+	}
+
+	// Invalidate all existing tokens by bumping token version
+	if err := s.userRepo.IncrementTokenVersion(ctx, userID); err != nil {
 		return err
 	}
 

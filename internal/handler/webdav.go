@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -403,7 +404,7 @@ func (d *cloudDir) Seek(offset int64, whence int) (int64, error)       { return 
 func (d *cloudDir) Close() error                                        { return nil }
 
 func (d *cloudDir) Readdir(count int) ([]os.FileInfo, error) {
-	files, err := d.fs.fileService.ListFiles(d.ctx, d.userID, d.parentID)
+	files, err := d.fs.fileService.ListFiles(d.ctx, d.userID, d.parentID, "name", "asc")
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +414,16 @@ func (d *cloudDir) Readdir(count int) ([]os.FileInfo, error) {
 		infos = append(infos, &cloudFileInfo{file: &files[i]})
 	}
 
-	if count > 0 && len(infos) > count {
+	if count <= 0 {
+		// count <= 0 means read all entries
+		return infos, nil
+	}
+
+	// count > 0: return at most count entries, signal EOF when all consumed
+	if len(infos) == 0 {
+		return nil, io.EOF
+	}
+	if len(infos) > count {
 		return infos[:count], nil
 	}
 	return infos, nil
@@ -606,7 +616,7 @@ func (fs *cloudFS) copyFolder(ctx context.Context, userID int64, src *model.File
 		return http.StatusInternalServerError, err
 	}
 
-	children, err := fs.fileService.ListFiles(ctx, userID, src.ID)
+	children, err := fs.fileService.ListFiles(ctx, userID, src.ID, "name", "asc")
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}

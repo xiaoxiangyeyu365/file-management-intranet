@@ -127,6 +127,13 @@ func (s *UploadService) InitUpload(ctx context.Context, userID int64, req InitUp
 		return nil, errors.New("file name is required")
 	}
 
+	// Sanitize file name: reject path traversal and dangerous characters
+	sanitizedName := sanitizeFileName(req.FileName)
+	if sanitizedName == "" {
+		return nil, errors.New("invalid file name")
+	}
+	req.FileName = sanitizedName
+
 	// Check storage quota
 	if err := s.checkQuota(ctx, userID, req.FileSize); err != nil {
 		return nil, err
@@ -439,9 +446,13 @@ func (s *UploadService) CreateFileFromPhysical(ctx context.Context, userID, pare
 func (s *UploadService) UploadFile(ctx context.Context, userID, parentID int64,
 	name string, size int64, reader io.Reader) (*model.File, error) {
 
-	// 1. Validate name is not empty
+	// 1. Validate name is not empty and sanitize
 	if name == "" {
 		return nil, errors.New("file name is required")
+	}
+	name = sanitizeFileName(name)
+	if name == "" {
+		return nil, errors.New("invalid file name")
 	}
 
 	// 2. Write reader to temp file, computing MD5 via io.MultiWriter and accumulating actual size
@@ -563,4 +574,29 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// sanitizeFileName removes path separators, null bytes, and dangerous characters.
+// Returns the base filename only (no directory components).
+func sanitizeFileName(name string) string {
+	// Take only the base name to prevent path traversal
+	name = filepath.Base(name)
+
+	// Remove null bytes and control characters
+	var buf strings.Builder
+	for _, r := range name {
+		if r == 0 || r < 32 {
+			continue
+		}
+		buf.WriteRune(r)
+	}
+	name = buf.String()
+
+	// Reject empty or dot-only names
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+
+	return name
 }

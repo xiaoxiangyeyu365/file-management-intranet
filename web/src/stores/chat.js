@@ -75,15 +75,15 @@ export const useChatStore = defineStore('chat', {
       })
 
       // Add temporary assistant message
-      const tempMsg = {
+      const msgIdx = this.messages.length
+      this.messages.push({
         id: Date.now() + 1,
         role: 'assistant',
         content: '',
         sources: null,
         status: 'streaming',
         createdAt: new Date().toISOString()
-      }
-      this.messages.push(tempMsg)
+      })
 
       this.isStreaming = true
       this.streamError = null
@@ -91,21 +91,25 @@ export const useChatStore = defineStore('chat', {
       chatAPI.ask(
         this.currentConversation.id,
         question,
-        // onToken
+        // onToken — access via store index to maintain reactivity
         (content) => {
-          tempMsg.content += content
+          this.messages[msgIdx].content += content
         },
         // onDone
         (data) => {
-          tempMsg.id = data.messageId || tempMsg.id
-          tempMsg.status = 'done'
-          tempMsg.sources = data.sources || null
+          const msg = this.messages[msgIdx]
+          if (!msg) return
+          msg.id = data.messageId || msg.id
+          msg.status = 'done'
+          msg.sources = data.sources || null
           this.isStreaming = false
         },
         // onError
         (error) => {
-          tempMsg.status = 'error'
-          tempMsg.content = error
+          const msg = this.messages[msgIdx]
+          if (!msg) return
+          msg.status = 'error'
+          msg.content = error
           this.streamError = error
           this.isStreaming = false
         }

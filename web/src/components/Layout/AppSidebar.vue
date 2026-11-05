@@ -65,12 +65,22 @@
         <el-icon><List /></el-icon>
         <span>审计日志</span>
       </router-link>
+
+      <router-link
+        v-if="authStore.isAdmin"
+        to="/admin/settings"
+        class="nav-item"
+        :class="{ active: route.path === '/admin/settings' }"
+      >
+        <el-icon><Setting /></el-icon>
+        <span>系统设置</span>
+      </router-link>
     </nav>
 
     <div v-if="usedBytes > 0" class="storage-usage">
       <div class="storage-text">
-        <span>{{ formatBytes(usedBytes) }} 已使用</span>
-        <span v-if="effectiveQuota"> / {{ formatBytes(effectiveQuota) }}</span>
+        <span>{{ formatSize(usedBytes) }} 已使用</span>
+        <span v-if="effectiveQuota"> / {{ formatSize(effectiveQuota) }}</span>
       </div>
       <el-progress v-if="effectiveQuota" :percentage="usagePercent()" :status="usageStatus()" :stroke-width="6" />
     </div>
@@ -78,11 +88,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { storageAPI } from '@/utils/api'
-import { Folder, Delete, Document, User, Share, List, ChatDotRound } from '@element-plus/icons-vue'
+import { formatSize } from '@/utils/format'
+import { Folder, Delete, Document, User, Share, List, ChatDotRound, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -90,21 +101,24 @@ const authStore = useAuthStore()
 const usedBytes = ref(0)
 const effectiveQuota = ref(0)
 
-onMounted(async () => {
+async function fetchUsage() {
   try {
     const res = await storageAPI.getUsage()
-    usedBytes.value = res.data.usedBytes
-    effectiveQuota.value = res.data.effectiveQuota
+    const data = res.data || res
+    usedBytes.value = data.usedBytes
+    effectiveQuota.value = data.effectiveQuota
   } catch (e) { /* ignore */ }
+}
+
+onMounted(() => {
+  fetchUsage()
+  // Listen for storage refresh events from file operations
+  window.addEventListener('cloudbox:storage-changed', fetchUsage)
 })
 
-function formatBytes(bytes) {
-  if (!bytes) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
+onUnmounted(() => {
+  window.removeEventListener('cloudbox:storage-changed', fetchUsage)
+})
 
 function usagePercent() {
   if (!effectiveQuota.value) return 0

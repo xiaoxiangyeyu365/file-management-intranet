@@ -42,6 +42,7 @@ type FileService struct {
 	storage      Storage
 	audit        AuditRecorder
 	fileTagRepo  *repository.FileTagRepository
+	shareRepo    ShareRepository
 }
 
 func NewFileService(
@@ -50,6 +51,7 @@ func NewFileService(
 	storage Storage,
 	audit AuditRecorder,
 	fileTagRepo *repository.FileTagRepository,
+	shareRepo ShareRepository,
 ) *FileService {
 	return &FileService{
 		fileRepo:     fileRepo,
@@ -57,11 +59,37 @@ func NewFileService(
 		storage:      storage,
 		audit:        audit,
 		fileTagRepo:  fileTagRepo,
+		shareRepo:    shareRepo,
 	}
 }
 
-func (s *FileService) ListFiles(ctx context.Context, userID, folderID int64) ([]model.File, error) {
-	return s.fileRepo.FindByParentAndOwner(ctx, folderID, userID, false)
+func (s *FileService) ListFiles(ctx context.Context, userID, folderID int64, sortBy, sortOrder string) ([]model.File, error) {
+	sortBy, sortOrder = normalizeListSort(sortBy, sortOrder)
+	return s.fileRepo.FindByParentAndOwner(ctx, folderID, userID, false, sortBy, sortOrder)
+}
+
+func (s *FileService) ListFilesPaged(ctx context.Context, userID, folderID int64, page, pageSize int, sortBy, sortOrder string) ([]model.File, int64, error) {
+	sortBy, sortOrder = normalizeListSort(sortBy, sortOrder)
+	return s.fileRepo.FindByParentAndOwnerPaged(ctx, folderID, userID, page, pageSize, sortBy, sortOrder)
+}
+
+var validListSorts = map[string]bool{"name": true, "size": true, "updatedAt": true}
+
+// normalizeListSort rejects unknown sort fields/directions so they never
+// reach the repository's ORDER BY clause.
+func normalizeListSort(sortBy, sortOrder string) (string, string) {
+	if !validListSorts[sortBy] {
+		sortBy = "name"
+	}
+	if sortOrder != "desc" {
+		sortOrder = "asc"
+	}
+	return sortBy, sortOrder
+}
+
+// ListAllFiles returns all files (including in subfolders) for a user, with Physical preloaded.
+func (s *FileService) ListAllFiles(ctx context.Context, userID int64) ([]model.File, error) {
+	return s.fileRepo.FindAllByOwner(ctx, userID)
 }
 
 func (s *FileService) FindByName(ctx context.Context, userID, parentID int64, name string) (*model.File, error) {
@@ -303,6 +331,17 @@ func (s *FileService) PermanentDelete(ctx context.Context, userID, fileID int64)
 			if err := s.fileTagRepo.DeleteByFileID(ctx, f.ID); err != nil {
 				log.Printf("warning: failed to delete tags for file %d: %v", f.ID, err)
 			}
+		}
+	}
+
+	// Revoke shares for all files
+	if s.shareRepo != nil {
+		allFileIDs := make([]int64, 0, len(allFiles))
+		for _, f := range allFiles {
+			allFileIDs = append(allFileIDs, f.ID)
+		}
+		if err := s.shareRepo.RevokeByFileIDs(ctx, allFileIDs); err != nil {
+			log.Printf("warning: failed to revoke shares for deleted files: %v", err)
 		}
 	}
 
@@ -611,7 +650,7 @@ func (s *FileService) StreamBatchZip(ctx context.Context, userID int64, fileIDs 
 }
 
 func (s *FileService) addFolderToZip(ctx context.Context, zipWriter *zip.Writer, folder *model.File, basePath string) error {
-	files, err := s.fileRepo.FindByParentAndOwner(ctx, folder.ID, folder.OwnerID, false)
+	files, err := s.fileRepo.FindByParentAndOwner(ctx, folder.ID, folder.OwnerID, false, "name", "asc")
 	if err != nil {
 		return fmt.Errorf("failed to list folder contents: %w", err)
 	}
@@ -696,6 +735,17 @@ func (s *FileService) EmptyTrash(ctx context.Context, userID int64) (int, error)
 	for _, f := range allFiles {
 		if !f.IsFolder && f.ContentRef != 0 {
 			physicalRefCount[f.ContentRef]++
+		}
+	}
+
+	// Revoke shares for all trash files
+	if s.shareRepo != nil {
+		allFileIDs := make([]int64, 0, len(allFiles))
+		for _, f := range allFiles {
+			allFileIDs = append(allFileIDs, f.ID)
+		}
+		if err := s.shareRepo.RevokeByFileIDs(ctx, allFileIDs); err != nil {
+			log.Printf("warning: failed to revoke shares for trashed files: %v", err)
 		}
 	}
 

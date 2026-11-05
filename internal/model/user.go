@@ -15,6 +15,7 @@ type User struct {
 	Role            string    `gorm:"size:20;default:user" json:"role"`
 	Status          string    `gorm:"size:20;default:approved" json:"status"`
 	PasswordChanged bool      `gorm:"default:true" json:"passwordChanged"`
+	TokenVersion    int64     `gorm:"default:0" json:"-"`
 	CreatedAt       time.Time `json:"createdAt"`
 	DiskQuota       *int64    `gorm:"column:disk_quota" json:"diskQuota"`
 }

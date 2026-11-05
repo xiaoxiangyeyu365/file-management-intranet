@@ -29,7 +29,12 @@ export const useAuthStore = defineStore('auth', {
       return response.data || response
     },
 
-    logout() {
+    async logout() {
+      try {
+        await authAPI.logout()
+      } catch {
+        // Ignore logout API errors — still clear local state
+      }
       this.token = null
       this.user = null
       this.requirePasswordChange = false

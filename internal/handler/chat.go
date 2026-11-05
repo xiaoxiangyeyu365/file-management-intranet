@@ -31,6 +31,39 @@ type CreateConversationRequest struct {
 	FileIDs []int64 `json:"fileIds"`
 }
 
+// ListAvailableFiles returns all non-folder files that have been indexed (chunkCount > 0).
+func (h *ChatHandler) ListAvailableFiles(c *gin.Context) {
+	if h.ragService == nil {
+		response.Error(c, 403, "RAG service is not enabled")
+		return
+	}
+
+	userID := GetUserID(c)
+
+	// Get all root-level files and folders for the user
+	allFiles, err := h.fileService.ListAllFiles(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "failed to list files")
+		return
+	}
+
+	// Filter: non-folder, has physical content, chunkCount > 0
+	available := make([]gin.H, 0)
+	for _, f := range allFiles {
+		if f.IsFolder || f.Physical == nil || f.Physical.ChunkCount == 0 {
+			continue
+		}
+		available = append(available, gin.H{
+			"id":        f.ID,
+			"name":      f.Name,
+			"mimeType":  f.Physical.MimeType,
+			"chunkCount": f.Physical.ChunkCount,
+		})
+	}
+
+	response.Success(c, gin.H{"files": available})
+}
+
 type AskRequest struct {
 	Question string `json:"question" binding:"required"`
 }
@@ -53,6 +86,22 @@ func (h *ChatHandler) CreateConversation(c *gin.Context) {
 	}
 
 	userID := GetUserID(c)
+
+	// Validate file IDs — only allow indexed files
+	if len(req.FileIDs) > 0 {
+		validIDs := make([]int64, 0, len(req.FileIDs))
+		for _, fid := range req.FileIDs {
+			file, err := h.fileService.GetFile(c.Request.Context(), userID, fid)
+			if err != nil {
+				continue
+			}
+			if file.Physical == nil || file.Physical.ChunkCount == 0 {
+				continue
+			}
+			validIDs = append(validIDs, fid)
+		}
+		req.FileIDs = validIDs
+	}
 
 	fileIDsJSON := "[]"
 	if len(req.FileIDs) > 0 {

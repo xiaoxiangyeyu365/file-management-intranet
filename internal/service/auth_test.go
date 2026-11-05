@@ -220,7 +220,7 @@ func TestAuthService_Login(t *testing.T) {
 					return &model.User{ID: 1, PasswordHash: "hash", Status: model.UserStatusApproved, PasswordChanged: false}, nil
 				}
 				ph.checkPasswordFn = func(password, hash string) bool { return true }
-				tg.generateTokenFn = func(userID int64, username, role string) (string, error) {
+				tg.generateTokenFn = func(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 					return "token", nil
 				}
 			},
@@ -236,7 +236,7 @@ func TestAuthService_Login(t *testing.T) {
 					return &model.User{ID: 1, PasswordHash: "hash", Status: model.UserStatusApproved, PasswordChanged: true}, nil
 				}
 				ph.checkPasswordFn = func(password, hash string) bool { return true }
-				tg.generateTokenFn = func(userID int64, username, role string) (string, error) {
+				tg.generateTokenFn = func(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 					return "token", nil
 				}
 			},
@@ -251,7 +251,7 @@ func TestAuthService_Login(t *testing.T) {
 					return &model.User{ID: 1, Username: "testuser", Role: "user", PasswordHash: "hash", Status: model.UserStatusApproved, PasswordChanged: true}, nil
 				}
 				ph.checkPasswordFn = func(password, hash string) bool { return true }
-				tg.generateTokenFn = func(userID int64, username, role string) (string, error) {
+				tg.generateTokenFn = func(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 					return "jwt-token", nil
 				}
 			},
@@ -266,7 +266,7 @@ func TestAuthService_Login(t *testing.T) {
 					return &model.User{ID: 1, PasswordHash: "hash", Status: model.UserStatusApproved, PasswordChanged: true}, nil
 				}
 				ph.checkPasswordFn = func(password, hash string) bool { return true }
-				tg.generateTokenFn = func(userID int64, username, role string) (string, error) {
+				tg.generateTokenFn = func(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
 					return "", errors.New("token failed")
 				}
 			},

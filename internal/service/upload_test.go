@@ -171,7 +171,7 @@ func TestUploadService_InitUpload(t *testing.T) {
 			st := &mockStorage{}
 			tt.setup(fr, pr, ur, st)
 
-			svc := NewUploadService(fr, pr, ur, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+			svc := NewUploadService(fr, pr, ur, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 			resp, err := svc.InitUpload(context.Background(), tt.userID, tt.req)
 
 			if tt.wantErr != "" {
@@ -221,7 +221,7 @@ func TestUploadService_SaveChunk(t *testing.T) {
 				},
 			}
 
-			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 			err := svc.SaveChunk(context.Background(), tt.uploadID, tt.chunkIndex, strings.NewReader("test data"))
 
 			if tt.wantErr != "" {
@@ -266,7 +266,7 @@ func TestUploadService_CancelUpload(t *testing.T) {
 				},
 			}
 
-			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+			svc := NewUploadService(&mockFileRepo{}, &mockPhysicalFileRepo{}, &mockUserRepo{}, st, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 			err := svc.CancelUpload(context.Background(), tt.uploadID)
 
 			if tt.wantErr != "" {
@@ -414,7 +414,7 @@ func TestUploadService_CompleteUpload(t *testing.T) {
 				}
 			}
 
-			svc := NewUploadService(fr, pr, &mockUserRepo{}, st, img, chunkSize, testDefaultQuota, noopAudit)
+			svc := NewUploadService(fr, pr, &mockUserRepo{}, st, img, chunkSize, testDefaultQuota, noopAudit, nil, nil)
 
 			// Use the correct uploadID for all tests except the invalid one
 			uid := uploadID
@@ -490,7 +490,7 @@ func TestUploadFile_BasicUpload(t *testing.T) {
 		},
 	}
 
-	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit)
+	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 	reader := bytes.NewReader(content)
 
 	file, err := svc.UploadFile(context.Background(), 1, 0, "test.txt", int64(len(content)), reader)
@@ -566,7 +566,7 @@ func TestUploadFile_InstantUpload(t *testing.T) {
 	}
 	ur := &mockUserRepo{}
 
-	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 	reader := bytes.NewReader(content)
 
 	file, err := svc.UploadFile(context.Background(), 1, 0, "dup.txt", int64(len(content)), reader)
@@ -605,7 +605,7 @@ func TestUploadFile_QuotaExceeded(t *testing.T) {
 	}
 	ur := &mockUserRepo{}
 
-	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit)
+	svc := NewUploadService(fr, pr, ur, sm, &mockImageProcessor{}, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 	reader := bytes.NewReader(content)
 
 	file, err := svc.UploadFile(context.Background(), 1, 0, "big.txt", int64(len(content)), reader)
@@ -654,7 +654,7 @@ func TestUploadFile_UnknownSize(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit)
+	svc := NewUploadService(fr, pr, ur, sm, img, 5*1024*1024, testDefaultQuota, noopAudit, nil, nil)
 	reader := bytes.NewReader(content)
 
 	// Pass size=0 (unknown Content-Length)

@@ -73,12 +73,16 @@ func (r *ClipboardRepository) CountUnpinned(ctx context.Context, userID int64) (
 }
 
 func (r *ClipboardRepository) DeleteOldestUnpinned(ctx context.Context, userID int64, keepCount int) error {
+    // MySQL doesn't allow DELETE FROM t WHERE id IN (SELECT id FROM t ...)
+    // so we wrap the inner SELECT in an additional derived table
     sql := `DELETE FROM clipboard_records
             WHERE id IN (
-                SELECT id FROM clipboard_records
-                WHERE user_id = ? AND pinned = 0
-                ORDER BY created_at ASC
-                LIMIT ?
+                SELECT * FROM (
+                    SELECT id FROM clipboard_records
+                    WHERE user_id = ? AND pinned = 0
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                ) AS tmp
             )`
     return r.db.WithContext(ctx).Exec(sql, userID, keepCount).Error
 }

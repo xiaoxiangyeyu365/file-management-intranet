@@ -50,9 +50,36 @@ func (r *FileRepository) FindByIDAndOwner(ctx context.Context, id, ownerID int64
 	return &file, nil
 }
 
-func (r *FileRepository) FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool) ([]model.File, error) {
-	query := r.db.WithContext(ctx).
-		Where("owner_id = ?", ownerID)
+func (r *FileRepository) FindByParentAndOwner(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error) {
+	var files []model.File
+	if err := applyListSort(r.parentQuery(ctx, parentID, ownerID, includeDeleted), sortBy, sortOrder).Find(&files).Error; err != nil {
+		return nil, err
+	}
+
+	r.loadPhysicalFiles(ctx, files)
+	return files, nil
+}
+
+func (r *FileRepository) FindByParentAndOwnerPaged(ctx context.Context, parentID, ownerID int64, page, pageSize int, sortBy, sortOrder string) ([]model.File, int64, error) {
+	base := r.parentQuery(ctx, parentID, ownerID, false)
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * pageSize
+	var files []model.File
+	if err := applyListSort(base, sortBy, sortOrder).Offset(offset).Limit(pageSize).Find(&files).Error; err != nil {
+		return nil, 0, err
+	}
+
+	r.loadPhysicalFiles(ctx, files)
+	return files, total, nil
+}
+
+func (r *FileRepository) parentQuery(ctx context.Context, parentID, ownerID int64, includeDeleted bool) *gorm.DB {
+	query := r.db.WithContext(ctx).Model(&model.File{}).Where("owner_id = ?", ownerID)
 
 	if parentID == 0 {
 		query = query.Where("parent_id = 0 OR parent_id IS NULL")
@@ -63,20 +90,43 @@ func (r *FileRepository) FindByParentAndOwner(ctx context.Context, parentID, own
 	if !includeDeleted {
 		query = query.Where("deleted_at IS NULL")
 	}
+	return query
+}
 
-	var files []model.File
-	err := query.Order("is_folder DESC, name ASC").Find(&files).Error
-	if err != nil {
-		return nil, err
+// applyListSort orders the listing. Folders always come first, and the
+// remaining files are ordered by the requested field. sortBy/sortOrder are
+// whitelisted here as a final line of defense against SQL injection.
+func applyListSort(query *gorm.DB, sortBy, sortOrder string) *gorm.DB {
+	if sortBy == "size" {
+		// files.physical_ref may be 0 for folders or legacy rows, hence LEFT JOIN.
+		query = query.
+			Joins("LEFT JOIN physical_files pf ON pf.id = files.physical_ref").
+			Select("files.*")
 	}
 
-	// Manually load Physical for files that have one
+	dir := "ASC"
+	if sortOrder == "desc" {
+		dir = "DESC"
+	}
+
+	var order string
+	switch sortBy {
+	case "size":
+		order = fmt.Sprintf("is_folder DESC, COALESCE(pf.size, 0) %s, name ASC", dir)
+	case "updatedAt":
+		order = fmt.Sprintf("is_folder DESC, updated_at %s, name ASC", dir)
+	default:
+		order = fmt.Sprintf("is_folder DESC, name %s", dir)
+	}
+	return query.Order(order)
+}
+
+func (r *FileRepository) loadPhysicalFiles(ctx context.Context, files []model.File) {
 	for i := range files {
 		if files[i].ContentRef != 0 {
 			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
 		}
 	}
-	return files, nil
 }
 
 func (r *FileRepository) FindByNameAndParent(ctx context.Context, ownerID, parentID int64, name string) (*model.File, error) {
@@ -187,6 +237,24 @@ func (r *FileRepository) FindAllDescendants(ctx context.Context, parentID int64)
 	}
 
 	// Manually load Physical for files that have one
+	for i := range files {
+		if files[i].ContentRef != 0 {
+			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
+		}
+	}
+	return files, nil
+}
+
+// FindAllByOwner returns all non-deleted files for a user with Physical preloaded.
+func (r *FileRepository) FindAllByOwner(ctx context.Context, ownerID int64) ([]model.File, error) {
+	var files []model.File
+	err := r.db.WithContext(ctx).
+		Where("owner_id = ? AND deleted_at IS NULL", ownerID).
+		Find(&files).Error
+	if err != nil {
+		return nil, err
+	}
+
 	for i := range files {
 		if files[i].ContentRef != 0 {
 			r.db.WithContext(ctx).First(&files[i].Physical, files[i].ContentRef)
@@ -312,12 +380,4 @@ func sanitizeSearchKeyword(keyword string) string {
 	result := strings.ReplaceAll(keyword, "\\", "\\\\")
 	result = strings.ReplaceAll(result, "'", "''")
 	return result
-}
-
-func (r *FileRepository) FindAllByOwner(ctx context.Context, ownerID int64) ([]model.File, error) {
-	var files []model.File
-	err := r.db.WithContext(ctx).
-		Where("owner_id = ?", ownerID).
-		Find(&files).Error
-	return files, err
 }

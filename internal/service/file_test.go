@@ -92,7 +92,7 @@ func TestFileService_CreateFolder(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
 
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			_, err := svc.CreateFolder(context.Background(), tt.userID, tt.parentID, tt.folderName)
 
 			if tt.wantErr != nil {
@@ -175,7 +175,7 @@ func TestFileService_Rename(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
 
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			err := svc.Rename(context.Background(), 1, 1, tt.newName)
 
 			if tt.wantErr != nil {
@@ -230,7 +230,7 @@ func TestFileService_MoveToTrash(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
 
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			err := svc.MoveToTrash(context.Background(), 1, 1)
 
 			if tt.wantErr != nil {
@@ -384,7 +384,7 @@ func TestFileService_MoveFiles(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
 
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			err := svc.MoveFiles(context.Background(), 1, tt.fileIDs, tt.targetID)
 
 			if tt.wantErr != nil {
@@ -519,7 +519,7 @@ func TestFileService_RestoreFile(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
 
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			err := svc.RestoreFile(context.Background(), 1, 1)
 
 			if tt.wantErr != nil {
@@ -635,7 +635,7 @@ func TestFileService_PermanentDelete(t *testing.T) {
 				},
 			}
 
-			svc := NewFileService(fr, pr, st, noopAudit)
+			svc := NewFileService(fr, pr, st, noopAudit, nil, nil)
 			err := svc.PermanentDelete(context.Background(), 1, 1)
 
 			if tt.wantErr != nil {
@@ -655,18 +655,40 @@ func TestFileService_PermanentDelete(t *testing.T) {
 }
 
 func TestFileService_ListFiles(t *testing.T) {
+	var gotSortBy, gotSortOrder string
 	fr := &mockFileRepo{
-		findByParentAndOwnerFn: func(ctx context.Context, parentID, ownerID int64, includeDeleted bool) ([]model.File, error) {
+		findByParentAndOwnerFn: func(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error) {
+			gotSortBy, gotSortOrder = sortBy, sortOrder
 			return []model.File{{ID: 1, Name: "test.txt"}}, nil
 		},
 	}
-	svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
-	files, err := svc.ListFiles(context.Background(), 1, 0)
+	svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
+	files, err := svc.ListFiles(context.Background(), 1, 0, "size", "desc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(files) != 1 {
 		t.Errorf("expected 1 file, got %d", len(files))
+	}
+	if gotSortBy != "size" || gotSortOrder != "desc" {
+		t.Fatalf("expected sort size desc passed to repo, got %s %s", gotSortBy, gotSortOrder)
+	}
+}
+
+func TestFileService_ListFiles_InvalidSortFallsBack(t *testing.T) {
+	var gotSortBy, gotSortOrder string
+	fr := &mockFileRepo{
+		findByParentAndOwnerFn: func(ctx context.Context, parentID, ownerID int64, includeDeleted bool, sortBy, sortOrder string) ([]model.File, error) {
+			gotSortBy, gotSortOrder = sortBy, sortOrder
+			return nil, nil
+		},
+	}
+	svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
+	if _, err := svc.ListFiles(context.Background(), 1, 0, "DROP TABLE files", "sideways"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotSortBy != "name" || gotSortOrder != "asc" {
+		t.Fatalf("expected fallback to name asc, got %s %s", gotSortBy, gotSortOrder)
 	}
 }
 
@@ -699,7 +721,7 @@ func TestFileService_GetFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fr := &mockFileRepo{}
 			tt.setup(fr)
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			_, err := svc.GetFile(context.Background(), 1, 1)
 
 			if tt.wantErr != nil {
@@ -737,7 +759,7 @@ func TestFileService_SearchFiles(t *testing.T) {
 					return []model.File{}, nil
 				},
 			}
-			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit)
+			svc := NewFileService(fr, &mockPhysicalFileRepo{}, &mockStorage{}, noopAudit, nil, nil)
 			_, err := svc.SearchFiles(context.Background(), 1, tt.keyword, nil, tt.sort)
 
 			if tt.wantErr && err == nil {

@@ -117,6 +117,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { adminAPI } from '@/utils/api'
+import { formatDate } from '@/utils/format'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
@@ -133,11 +134,7 @@ const filters = reactive({
   dateRange: null
 })
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleString('zh-CN')
-}
+// formatDate is imported from @/utils/format
 
 function actionLabel(action) {
   const map = {

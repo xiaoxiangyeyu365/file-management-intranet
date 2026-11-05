@@ -59,6 +59,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Folder, Document, Lock, Download } from '@element-plus/icons-vue'
 import { useSharesStore } from '../stores/shares'
+import { formatSize, formatDate } from '@/utils/format'
 
 const route = useRoute()
 const sharesStore = useSharesStore()
@@ -127,19 +128,7 @@ function handleDownload() {
   window.open(url, '_blank')
 }
 
-function formatFileSize(bytes) {
-  if (!bytes || bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
+const formatFileSize = formatSize
 </script>
 
 <style scoped>

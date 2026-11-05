@@ -43,6 +43,10 @@ type MoveRequest struct {
 // @Produce json
 // @Security BearerAuth
 // @Param folderId query int false "文件夹ID，0表示根目录"
+// @Param page query int false "页码，从1开始；不传则返回全部"
+// @Param pageSize query int false "每页数量；不传则返回全部"
+// @Param sortBy query string false "排序字段(name/size/updatedAt)"
+// @Param sortOrder query string false "排序方向(asc/desc)"
 // @Success 200 {object} map[string]interface{} "文件列表"
 // @Router /api/files [get]
 func (h *FileHandler) ListFiles(c *gin.Context) {
@@ -54,14 +58,40 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 		folderID, _ = strconv.ParseInt(folderIDStr, 10, 64)
 	}
 
-	files, err := h.fileService.ListFiles(c.Request.Context(), userID, folderID)
+	// Pagination: optional. page=1, pageSize=50 by default.
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "0"))
+
+	// Sorting: validated/normalized again in the service layer.
+	sortBy := c.DefaultQuery("sortBy", "name")
+	sortOrder := c.DefaultQuery("sortOrder", "asc")
+
+	// If page/pageSize not provided, return all files (backward compatible)
+	if page <= 0 || pageSize <= 0 {
+		files, err := h.fileService.ListFiles(c.Request.Context(), userID, folderID, sortBy, sortOrder)
+		if err != nil {
+			response.InternalError(c, "failed to list files")
+			return
+		}
+		response.Success(c, gin.H{
+			"files": files,
+			"total": int64(len(files)),
+		})
+		return
+	}
+
+	// Paginated mode
+	files, total, err := h.fileService.ListFilesPaged(c.Request.Context(), userID, folderID, page, pageSize, sortBy, sortOrder)
 	if err != nil {
 		response.InternalError(c, "failed to list files")
 		return
 	}
 
 	response.Success(c, gin.H{
-		"files": files,
+		"files":    files,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
 	})
 }
 
@@ -334,6 +364,30 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	c.File(absPath)
 }
 
+// PreviewFile serves a file inline (not as attachment) for browser-based preview.
+func (h *FileHandler) PreviewFile(c *gin.Context) {
+	userID := GetUserID(c)
+	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+
+	file, pf, err := h.fileService.DownloadFile(c.Request.Context(), userID, fileID)
+	if err != nil {
+		if err == service.ErrFileNotFound {
+			response.NotFound(c, "file not found")
+			return
+		}
+		response.Error(c, 400, err.Error())
+		return
+	}
+
+	// Set Content-Disposition to inline for browser preview
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename*=UTF-8''%s", url.PathEscape(file.Name)))
+	c.Header("Content-Type", pf.MimeType)
+	c.Header("Content-Length", fmt.Sprintf("%d", pf.Size))
+
+	absPath := h.fileService.GetStorage().ToAbsPath(pf.StoragePath)
+	c.File(absPath)
+}
+
 func (h *FileHandler) GetThumbnail(c *gin.Context) {
 	userID := GetUserID(c)
 	fileID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -510,4 +564,61 @@ func (h *FileHandler) RegenerateSummary(c *gin.Context) {
 		"summary": summary,
 		"tags":    tags,
 	})
+}
+
+// FolderTreeNode represents a folder in the tree response.
+type FolderTreeNode struct {
+	ID       int64          `json:"id"`
+	Name     string         `json:"name"`
+	ParentID int64          `json:"parentId"`
+	Children []FolderTreeNode `json:"children"`
+}
+
+// ListFolderTree godoc
+// @Summary 获取文件夹树
+// @Description 返回当前用户的所有文件夹，以树形结构组织
+// @Tags files
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Router /api/folders/tree [get]
+func (h *FileHandler) ListFolderTree(c *gin.Context) {
+	userID := GetUserID(c)
+
+	allFiles, err := h.fileService.ListAllFiles(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "failed to list folders")
+		return
+	}
+
+	// Filter to folders only
+	var folders []FolderTreeNode
+	for _, f := range allFiles {
+		if f.IsFolder && !f.DeletedAt.Valid {
+			parentID := int64(0)
+			if f.ParentID.Valid {
+				parentID = f.ParentID.Int64
+			}
+			folders = append(folders, FolderTreeNode{
+				ID:       f.ID,
+				Name:     f.Name,
+				ParentID: parentID,
+			})
+		}
+	}
+
+	// Build tree
+	tree := buildFolderTree(folders, 0)
+	response.Success(c, tree)
+}
+
+func buildFolderTree(folders []FolderTreeNode, parentID int64) []FolderTreeNode {
+	var tree []FolderTreeNode
+	for _, f := range folders {
+		if f.ParentID == parentID {
+			f.Children = buildFolderTree(folders, f.ID)
+			tree = append(tree, f)
+		}
+	}
+	return tree
 }

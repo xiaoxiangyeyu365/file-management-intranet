@@ -174,7 +174,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAdminStore } from '@/stores/admin'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import axios from 'axios'
+import { adminAPI } from '@/utils/api'
+import { formatSize, formatDate as formatDateTime } from '@/utils/format'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
@@ -240,18 +241,12 @@ function statusLabel(status) {
   }
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleString('zh-CN')
+function formatBytes(bytes) {
+  return formatSize(bytes)
 }
 
-function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+function formatDate(dateStr) {
+  return formatDateTime(dateStr)
 }
 
 const quotaMode = ref('global')
@@ -263,7 +258,7 @@ async function handleQuotaChange(user) {
   else if (quotaMode.value === 'custom') quota = Math.round(customQuotaGB.value * 1024 * 1024 * 1024)
 
   try {
-    await axios.put(`/admin/users/${user.id}/quota`, { disk_quota: quota })
+    await adminAPI.updateQuota(user.id, quota)
     ElMessage.success('配额已更新')
     fetchUsers()
   } catch (err) {

@@ -67,6 +67,7 @@ import { onMounted } from 'vue'
 import { Document } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSharesStore } from '../stores/shares'
+import { formatDate } from '@/utils/format'
 import AppHeader from '../components/Layout/AppHeader.vue'
 import AppSidebar from '../components/Layout/AppSidebar.vue'
 
@@ -81,12 +82,6 @@ function getStatus(share) {
   if (share.maxDownloads > 0 && share.downloadCount >= share.maxDownloads) return { text: '已用完', type: 'warning' }
   if (share.expiresAt && share.expiresAt.Valid && new Date(share.expiresAt.Time) <= new Date()) return { text: '已过期', type: 'info' }
   return { text: '有效', type: 'success' }
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 async function copyLink(share) {

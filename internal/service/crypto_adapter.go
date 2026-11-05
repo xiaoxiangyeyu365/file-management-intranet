@@ -16,6 +16,6 @@ func (c *cryptoAdapter) CheckPassword(password, hash string) bool {
 	return crypto.CheckPassword(password, hash)
 }
 
-func (c *cryptoAdapter) GenerateToken(userID int64, username, role string) (string, error) {
-	return crypto.GenerateToken(userID, username, role)
+func (c *cryptoAdapter) GenerateToken(userID int64, username, role string, tokenVersion int64, pwdChanged bool) (string, error) {
+	return crypto.GenerateToken(userID, username, role, tokenVersion, pwdChanged)
 }

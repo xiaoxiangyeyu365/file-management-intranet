@@ -94,6 +94,17 @@
               />
             </template>
           </template>
+
+          <!-- Pagination -->
+          <div v-if="filesStore.pagination.enabled && filesStore.pagination.total > filesStore.pagination.pageSize" class="pagination-wrapper">
+            <el-pagination
+              :current-page="filesStore.pagination.page"
+              :page-size="filesStore.pagination.pageSize"
+              :total="filesStore.pagination.total"
+              layout="prev, pager, next, total"
+              @current-change="filesStore.fetchPage"
+            />
+          </div>
         </div>
       </main>
 
@@ -131,6 +142,11 @@
       :file="previewFile"
     />
 
+    <DocPreview
+      v-model="showDocPreview"
+      :file="previewFile"
+    />
+
     <CreateShareDialog
       v-model:visible="showShareDialog"
       :file="shareFile"
@@ -165,6 +181,7 @@ import FileList from '@/components/Files/FileList.vue'
 import FileGrid from '@/components/Files/FileGrid.vue'
 import UploadPanel from '@/components/Upload/UploadPanel.vue'
 import ImagePreview from '@/components/Preview/ImagePreview.vue'
+import DocPreview from '@/components/Preview/DocPreview.vue'
 import CreateFolderDialog from '@/components/Dialogs/CreateFolderDialog.vue'
 import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
@@ -186,6 +203,7 @@ const showRename = ref(false)
 const showMove = ref(false)
 const showDeleteConfirm = ref(false)
 const showImagePreview = ref(false)
+const showDocPreview = ref(false)
 const showShareDialog = ref(false)
 const shareFile = ref(null)
 
@@ -203,13 +221,44 @@ onMounted(() => {
   document.addEventListener('dragenter', handleDragEnter)
   document.addEventListener('dragleave', handleDragLeave)
   document.addEventListener('drop', handleDocumentDrop)
+  document.addEventListener('keydown', handleKeyboardShortcut)
 })
 
 onUnmounted(() => {
   document.removeEventListener('dragenter', handleDragEnter)
   document.removeEventListener('dragleave', handleDragLeave)
   document.removeEventListener('drop', handleDocumentDrop)
+  document.removeEventListener('keydown', handleKeyboardShortcut)
 })
+
+// Keyboard shortcuts
+function handleKeyboardShortcut(e) {
+  // Ignore shortcuts when typing in input/textarea or when a dialog is open
+  const tag = e.target.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || showDeleteConfirm.value || showRename.value || showMove.value || showCreateFolder.value || showShareDialog.value) return
+
+  const hasSelection = filesStore.selectedIds.length > 0
+
+  if (e.key === 'Delete' && hasSelection) {
+    // Delete selected files
+    selectedFiles.value = filesStore.sortedFiles.filter(f => filesStore.selectedIds.includes(f.id))
+    handleBatchDelete()
+    e.preventDefault()
+  } else if (e.key === 'F2' && hasSelection && filesStore.selectedIds.length === 1) {
+    // Rename single selected file
+    const file = filesStore.sortedFiles.find(f => f.id === filesStore.selectedIds[0])
+    if (file) handleRename(file)
+    e.preventDefault()
+  } else if (e.key === 'Escape') {
+    // Clear selection
+    filesStore.setSelected([])
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+    // Select all files in current view
+    e.preventDefault()
+    const allIds = filesStore.sortedFiles.map(f => f.id)
+    filesStore.setSelected(allIds)
+  }
+}
 
 function handleDragEnter(e) {
   e.preventDefault()
@@ -274,12 +323,20 @@ function handleShareFile(file) {
 function handlePreviewFile(file) {
   const ext = file.name.split('.').pop().toLowerCase()
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
+  const textExts = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'log',
+    'csv', 'py', 'js', 'ts', 'jsx', 'tsx', 'html', 'htm', 'css', 'scss', 'sh', 'sql',
+    'java', 'c', 'cpp', 'h', 'go', 'rs', 'rb', 'php', 'vue', 'toml']
+  const pdfExts = ['pdf']
 
   if (imageExts.includes(ext)) {
     previewFile.value = file
     showImagePreview.value = true
+  } else if (textExts.includes(ext) || pdfExts.includes(ext)) {
+    previewFile.value = file
+    showDocPreview.value = true
   } else {
-    filesStore.downloadFile(file.id)
+    // Fallback: download
+    handleDownloadFile(file)
   }
 }
 
@@ -318,6 +375,7 @@ async function handleConfirmDelete() {
     for (const file of selectedFiles.value) {
       await filesStore.deleteFile(file.id)
     }
+    filesStore.notifyStorageChanged()
     ElMessage.success('删除成功')
     showDeleteConfirm.value = false
     selectedFiles.value = []
@@ -331,7 +389,7 @@ async function handleBatchDelete() {
   const count = filesStore.selectedIds.length
   try {
     await ElMessageBox.confirm(
-      `确定删除选中的 ${count} 个文件？此操作不可恢复`,
+      `确定删除选中的 ${count} 个文件？删除后将移至回收站`,
       '批量删除',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )

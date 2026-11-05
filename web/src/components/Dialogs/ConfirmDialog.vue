@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { WarningFilled, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -74,7 +74,18 @@ const iconColor = computed(() => {
 function handleConfirm() {
   loading.value = true
   emit('confirm')
+  // Reset loading state after a short delay to prevent permanent stuck state
+  setTimeout(() => {
+    loading.value = false
+  }, 3000)
 }
+
+// Reset loading when dialog closes
+watch(visible, (val) => {
+  if (!val) {
+    loading.value = false
+  }
+})
 </script>
 
 <style scoped lang="scss">

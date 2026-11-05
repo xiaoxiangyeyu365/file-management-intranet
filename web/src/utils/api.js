@@ -48,7 +48,10 @@ export const authAPI = {
 
 // Files API
 export const fileAPI = {
-  list: (folderId = 0) => api.get('/files', { params: { folderId } }),
+  list: (folderId = 0, sortBy = 'name', sortOrder = 'asc') =>
+    api.get('/files', { params: { folderId, sortBy, sortOrder } }),
+  listPaged: (folderId = 0, page = 1, pageSize = 50, sortBy = 'name', sortOrder = 'asc') =>
+    api.get('/files', { params: { folderId, page, pageSize, sortBy, sortOrder } }),
   search: (keyword, folderId = null, sort = 'relevance') =>
     api.get('/files/search', { params: { keyword, folderId, sort } }),
   lookup: (parentId, name) =>
@@ -58,14 +61,16 @@ export const fileAPI = {
   delete: (id) => api.delete(`/files/${id}`),
   move: (fileIds, targetFolderId) =>
     api.patch('/files/move', { fileIds, targetFolderId }),
-  downloadUrl: (id) => `${import.meta.env.VITE_API_BASE_URL || '/api'}/files/${id}/download`
+  downloadUrl: (id) => `${import.meta.env.VITE_API_BASE_URL || '/api'}/files/${id}/download`,
+  previewUrl: (id) => `${import.meta.env.VITE_API_BASE_URL || '/api'}/files/${id}/preview`
 }
 
 // Folders API
 export const folderAPI = {
   create: (parentId, name) => api.post('/folders', { parentId, name }),
   downloadUrl: (id) =>
-    `${import.meta.env.VITE_API_BASE_URL || '/api'}/folders/${id}/download`
+    `${import.meta.env.VITE_API_BASE_URL || '/api'}/folders/${id}/download`,
+  listTree: () => api.get('/folders/tree')
 }
 
 // Upload API
@@ -125,6 +130,9 @@ export const adminAPI = {
   resetPassword: (id, newPassword) =>
     api.put(`/admin/users/${id}/password`, { newPassword }),
   deleteUser: (id) => api.delete(`/admin/users/${id}`),
+  updateQuota: (id, quota) => api.put(`/admin/users/${id}/quota`, { disk_quota: quota }),
+  getSettings: () => api.get('/admin/settings'),
+  updateSettings: (data) => api.put('/admin/settings', data),
   listAuditLogs: (params) => api.get('/admin/audit-logs', { params })
 }
 
@@ -149,6 +157,7 @@ export const storageAPI = {
 
 // Chat API (RAG)
 export const chatAPI = {
+  availableFiles: () => api.get('/chat/available-files'),
   createConversation: (data) => api.post('/chat/conversations', data),
   listConversations: (limit = 20, offset = 0) =>
     api.get('/chat/conversations', { params: { limit, offset } }),
@@ -159,30 +168,61 @@ export const chatAPI = {
   ask: (conversationId, question, onToken, onDone, onError) => {
     const token = localStorage.getItem('cloudbox_token')
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-    const url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}&token=${encodeURIComponent(token || '')}`
-    const es = new EventSource(url)
+    const url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}`
 
-    es.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data)
-        if (parsed.content !== undefined && onToken) onToken(parsed.content)
-        if (parsed.messageId !== undefined) {
-          if (onDone) onDone(parsed)
-          es.close()
+    let cancelled = false
+
+    fetch(url, {
+      headers: {
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Authorization': token ? `Bearer ${token}` : ''
+      }
+    }).then(async (response) => {
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        if (!cancelled) onError(`请求失败 (${response.status}): ${text}`)
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done || cancelled) break
+
+        buf += decoder.decode(value, { stream: true })
+        // Parse SSE lines
+        const lines = buf.split('\n')
+        buf = lines.pop() || '' // keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (trimmed === '' || !trimmed.startsWith('data: ')) continue
+          const data = trimmed.slice(6)
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.content !== undefined && onToken) {
+              onToken(parsed.content)
+            }
+            if (parsed.messageId !== undefined) {
+              if (onDone) onDone(parsed)
+              cancelled = true
+            }
+            if (parsed.error) {
+              if (onError) onError(parsed.error)
+              cancelled = true
+            }
+          } catch (e) { /* skip malformed JSON */ }
         }
-        if (parsed.error) {
-          if (onError) onError(parsed.error)
-          es.close()
-        }
-      } catch (e) { /* skip */ }
-    }
+      }
+    }).catch((err) => {
+      if (!cancelled) onError('请求失败: ' + err.message)
+    })
 
-    es.onerror = () => {
-      if (onError) onError('连接中断')
-      es.close()
-    }
-
-    return es
+    return { close: () => { cancelled = true } }
   },
   reindexFile: (id) => api.post(`/files/${id}/reindex`)
 }

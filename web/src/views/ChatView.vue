@@ -1,7 +1,21 @@
 <template>
   <div class="chat-container">
-    <!-- Conversation List -->
-    <div class="chat-sidebar">
+    <!-- Mobile Header Bar -->
+    <div class="mobile-header">
+      <el-button text @click="sidebarOpen = true" class="menu-btn">
+        <el-icon :size="20"><Menu /></el-icon>
+      </el-button>
+      <span class="mobile-title">{{ chatStore.currentConversation?.title || 'AI 问答' }}</span>
+      <el-button text @click="handleNewConversation" class="new-btn">
+        <el-icon :size="20"><EditPen /></el-icon>
+      </el-button>
+    </div>
+
+    <!-- Sidebar Overlay -->
+    <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false" />
+
+    <!-- Conversation List Sidebar -->
+    <div class="chat-sidebar" :class="{ open: sidebarOpen }">
       <div class="chat-sidebar-header">
         <h3>AI 问答</h3>
         <el-button type="primary" size="small" @click="handleNewConversation">
@@ -44,10 +58,10 @@
             :class="[msg.role, msg.status]"
           >
             <div class="message-bubble">
-              <div class="message-content">{{ msg.content }}</div>
+              <div v-if="msg.status !== 'error'" class="message-content">{{ msg.content }}</div>
               <div v-if="msg.status === 'error'" class="message-error">
-                <span v-if="msg.content">{{ msg.content }}</span>
-                <span v-else>回复中断</span>
+                <el-icon :size="14"><WarningFilled /></el-icon>
+                <span>{{ msg.content || '回复中断' }}</span>
                 <el-button size="small" text type="primary" @click="chatStore.retryAsk()">
                   重试
                 </el-button>
@@ -95,16 +109,17 @@
     </div>
 
     <!-- File Selection Dialog -->
-    <el-dialog v-model="fileDialogVisible" title="选择文件" width="500px">
+    <el-dialog v-model="fileDialogVisible" title="选择文件" width="90%" :fullscreen="isMobile">
       <div class="file-select-list">
         <el-checkbox-group v-model="selectedFileIds">
           <div v-for="file in availableFiles" :key="file.id" class="file-select-item">
-            <el-checkbox :label="file.id" :disabled="file.isFolder">
+            <el-checkbox :label="file.id">
               {{ file.name }}
+              <span class="file-meta">({{ file.chunkCount }} 个片段)</span>
             </el-checkbox>
           </div>
         </el-checkbox-group>
-        <div v-if="availableFiles.length === 0" class="empty-hint">暂无文件</div>
+        <div v-if="availableFiles.length === 0" class="empty-hint">暂无可用的已索引文件，请先上传文档</div>
       </div>
       <template #footer>
         <el-button @click="fileDialogVisible = false">取消</el-button>
@@ -117,13 +132,12 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import { fileAPI } from '@/utils/api'
-import { Delete, Promotion } from '@element-plus/icons-vue'
+import { chatAPI } from '@/utils/api'
+import { Delete, Promotion, Menu, EditPen, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
-import { computed } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -134,20 +148,33 @@ const messageArea = ref(null)
 const fileDialogVisible = ref(false)
 const availableFiles = ref([])
 const selectedFileIds = ref([])
+const sidebarOpen = ref(false)
+
+const isMobile = ref(window.innerWidth < 768)
 
 const currentId = computed(() => {
   const id = route.params.id
   return id ? parseInt(id) : null
 })
 
+function updateIsMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+
 onMounted(() => {
+  window.addEventListener('resize', updateIsMobile)
   chatStore.loadConversations()
   if (currentId.value) {
     chatStore.loadConversation(currentId.value)
   }
 })
 
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
+})
+
 watch(currentId, (id) => {
+  sidebarOpen.value = false
   if (id) {
     chatStore.loadConversation(id)
   } else {
@@ -161,13 +188,21 @@ watch(() => chatStore.messages.length, () => {
   scrollToBottom()
 })
 
-// Auto-scroll during streaming
+// Auto-scroll during streaming (only if user is already near the bottom)
 watch(() => {
   const last = chatStore.messages[chatStore.messages.length - 1]
   return last?.content?.length || 0
 }, () => {
-  scrollToBottom()
+  if (isNearBottom()) {
+    scrollToBottom()
+  }
 })
+
+function isNearBottom(threshold = 60) {
+  if (!messageArea.value) return true
+  const el = messageArea.value
+  return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -178,14 +213,15 @@ function scrollToBottom() {
 }
 
 async function handleNewConversation() {
+  sidebarOpen.value = false
   try {
-    const res = await fileAPI.list(0)
+    const res = await chatAPI.availableFiles()
     const data = res.data || res
-    availableFiles.value = (data.files || data || []).filter(f => !f.isFolder)
+    availableFiles.value = data.files || []
     selectedFileIds.value = []
     fileDialogVisible.value = true
   } catch (e) {
-    console.error('Failed to load files', e)
+    console.error('Failed to load available files', e)
   }
 }
 
@@ -215,7 +251,9 @@ async function handleDelete(id) {
   }
 }
 
-async function handleAsk() {
+async function handleAsk(e) {
+  // Shift+Enter: allow newlines, Enter: send
+  if (e && e.shiftKey) return
   const q = inputText.value.trim()
   if (!q || chatStore.isStreaming) return
   inputText.value = ''
@@ -228,6 +266,18 @@ async function handleAsk() {
   display: flex;
   height: calc(100vh - 56px);
   background: #fff;
+  position: relative;
+  overflow: hidden;
+}
+
+// Mobile Header (hidden on desktop)
+.mobile-header {
+  display: none;
+}
+
+// Sidebar Overlay (hidden on desktop)
+.sidebar-overlay {
+  display: none;
 }
 
 .chat-sidebar {
@@ -311,6 +361,7 @@ async function handleAsk() {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .message {
@@ -413,11 +464,130 @@ async function handleAsk() {
 .file-select-item {
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
+
+  .file-meta {
+    color: #909399;
+    font-size: 12px;
+    margin-left: 4px;
+  }
 }
 
+// ---- Mobile Styles ----
 @media (max-width: 767px) {
+  .chat-container {
+    flex-direction: column;
+    height: 100dvh; // dynamic viewport height for mobile keyboards
+  }
+
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e4e7ed;
+    background: #fff;
+    z-index: 10;
+    flex-shrink: 0;
+
+    .mobile-title {
+      flex: 1;
+      text-align: center;
+      font-size: 16px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .menu-btn, .new-btn {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+    }
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 100;
+  }
+
   .chat-sidebar {
-    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 101;
+    background: #fff;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+
+    &.open {
+      transform: translateX(0);
+      box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+    }
+  }
+
+  .conversation-item {
+    padding: 14px 12px;
+
+    // Always show delete button on mobile (no hover on touch)
+    .delete-btn {
+      opacity: 0.6;
+    }
+  }
+
+  .chat-main {
+    flex: 1;
+    min-height: 0; // allow flex child to shrink for keyboard
+  }
+
+  .message-area {
+    padding: 12px;
+    padding-bottom: 8px;
+  }
+
+  .message-bubble {
+    max-width: 88%; // slightly wider on small screens
+    padding: 10px 14px;
+    font-size: 15px;
+    border-radius: 16px;
+  }
+
+  .message-sources {
+    max-width: 88%;
+  }
+
+  .input-area {
+    padding: 8px 12px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom)); // safe area for notch devices
+    border-top: 1px solid #e4e7ed;
+    background: #fff;
+    flex-shrink: 0;
+
+    :deep(.el-input__wrapper) {
+      border-radius: 20px;
+    }
+  }
+
+  .empty-state {
+    padding: 0 24px;
+    text-align: center;
+
+    p {
+      font-size: 14px;
+    }
+  }
+
+  .file-select-list {
+    max-height: 60vh;
   }
 }
 </style>

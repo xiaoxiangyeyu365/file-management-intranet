@@ -57,6 +57,11 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Printf("disk_quota column migration: %v (may already exist)", err)
 	}
 
+	// Add token_version column for JWT revocation support
+	if err := DB.Exec("ALTER TABLE users ADD COLUMN token_version BIGINT NOT NULL DEFAULT 0").Error; err != nil {
+		log.Printf("token_version column migration: %v (may already exist)", err)
+	}
+
 	// Create files table (GORM doesn't handle it well with custom fields)
 	if err := createFilesTable(); err != nil {
 		log.Fatalf("failed to create files table: %v", err)

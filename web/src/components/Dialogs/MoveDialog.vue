@@ -16,11 +16,12 @@
       </div>
 
       <el-tree
-        :data="folderTree"
+        :data="folderTreeData"
         :props="{ label: 'name', children: 'children' }"
         node-key="id"
         :expand-on-click-node="false"
         :current-node-key="targetFolderId"
+        v-loading="treeLoading"
         @node-click="handleNodeClick"
       >
         <template #default="{ node, data }">
@@ -42,6 +43,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useFilesStore } from '@/stores/files'
+import { folderAPI } from '@/utils/api'
 import { ElMessage } from 'element-plus'
 import { House, Folder } from '@element-plus/icons-vue'
 
@@ -67,26 +69,27 @@ const visible = computed({
 
 const targetFolderId = ref(0)
 const loading = ref(false)
+const folderTreeData = ref([])
+const treeLoading = ref(false)
 
-const folderTree = computed(() => {
-  const allFiles = filesStore.files.concat(filesStore.searchResults)
-  const folders = allFiles.filter(f => f.isFolder)
-
-  const buildTree = (parentId) => {
-    return folders
-      .filter(f => f.parentId === parentId || (parentId === 0 && (f.parentId === 0 || !f.parentId)))
-      .map(f => ({
-        ...f,
-        children: buildTree(f.id)
-      }))
+// Build folder tree from API response
+async function fetchFolderTree() {
+  treeLoading.value = true
+  try {
+    const res = await folderAPI.listTree()
+    folderTreeData.value = res?.data || res || []
+  } catch (err) {
+    console.error('Failed to load folder tree:', err)
+    folderTreeData.value = []
+  } finally {
+    treeLoading.value = false
   }
-
-  return buildTree(0)
-})
+}
 
 watch(visible, (val) => {
   if (val) {
     targetFolderId.value = 0
+    fetchFolderTree()
   }
 })
 
@@ -116,6 +119,7 @@ async function handleSubmit() {
 
 function handleClosed() {
   targetFolderId.value = 0
+  folderTreeData.value = []
 }
 </script>
 

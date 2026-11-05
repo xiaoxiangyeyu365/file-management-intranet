@@ -2,6 +2,7 @@
   <div class="file-list">
     <el-table
       :data="files"
+      :default-sort="defaultSort"
       @row-dblclick="handleDoubleClick"
       @selection-change="handleSelectionChange"
       @sort-change="handleSortChange"
@@ -10,23 +11,23 @@
     >
       <el-table-column type="selection" width="50" />
 
-      <el-table-column label="名称" min-width="300">
+      <el-table-column label="名称" prop="name" min-width="300" sortable="custom">
         <template #default="{ row }">
-          <div class="file-name" @click="handleClick(row)">
+          <div class="file-name" @click="handleClick(row, $event)">
             <span class="file-icon">{{ getFileIcon(row) }}</span>
             <span class="file-text">{{ row.name }}</span>
           </div>
         </template>
       </el-table-column>
 
-      <el-table-column label="大小" width="120" :sort-method="sortBySize" :sortable="'custom'">
+      <el-table-column label="大小" prop="size" width="120" sortable="custom">
         <template #default="{ row }">
           <span v-if="row.isFolder">-</span>
           <span v-else>{{ formatSize(row.physical?.size || 0) }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="修改时间" width="180" :sort-method="sortByTime" :sortable="'custom'">
+      <el-table-column label="修改时间" prop="updatedAt" width="180" sortable="custom">
         <template #default="{ row }">
           <span v-if="row.updatedAt && row.updatedAt !== '0001-01-01T00:00:00Z'">{{ formatDate(row.updatedAt) }}</span>
           <span v-else>-</span>
@@ -76,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
 import { MoreFilled, Edit, Download, Right, Delete, Share } from '@element-plus/icons-vue'
@@ -92,6 +93,11 @@ const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'dele
 
 const filesStore = useFilesStore()
 
+const defaultSort = computed(() => ({
+  prop: filesStore.sortBy,
+  order: filesStore.sortOrder === 'asc' ? 'ascending' : 'descending'
+}))
+
 // Context menu state
 const contextMenuVisible = ref(false)
 const contextMenuFile = ref(null)
@@ -99,7 +105,12 @@ const contextMenuPos = ref({ x: 0, y: 0 })
 
 function showContextMenu(event, file) {
   contextMenuFile.value = file
-  contextMenuPos.value = { x: event.clientX, y: event.clientY }
+  // Clamp position to viewport bounds
+  const menuWidth = 160
+  const menuHeight = 200
+  const x = Math.max(0, Math.min(event.clientX, window.innerWidth - menuWidth))
+  const y = Math.max(0, Math.min(event.clientY, window.innerHeight - menuHeight))
+  contextMenuPos.value = { x, y }
   contextMenuVisible.value = true
 }
 
@@ -163,7 +174,12 @@ function getFileIcon(file) {
   return '📄'
 }
 
-function handleClick(file) {
+function handleClick(file, event) {
+  if (event && event.shiftKey) {
+    // Shift+Click: range select
+    filesStore.selectRange(props.files, file.id)
+    return
+  }
   if (file.isFolder) {
     emit('open', file)
   } else {
@@ -183,21 +199,12 @@ function handleSelectionChange(selection) {
   filesStore.setSelected(selection.map(f => f.id))
 }
 
-function sortBySize(a, b) {
-  return (a.physical?.size ?? 0) - (b.physical?.size ?? 0)
-}
-
-function sortByTime(a, b) {
-  return (a.updatedAt || '').localeCompare(b.updatedAt || '')
-}
-
 function handleSortChange({ prop, order }) {
   if (!order) {
     filesStore.setSort('name', 'asc')
-  } else {
-    const sortBy = prop === '大小' || prop === 'size' ? 'size' : prop === '修改时间' || prop === 'updatedAt' ? 'updatedAt' : 'name'
-    filesStore.setSort(sortBy, order === 'ascending' ? 'asc' : 'desc')
+    return
   }
+  filesStore.setSort(prop || 'name', order === 'ascending' ? 'asc' : 'desc')
 }
 </script>
 
