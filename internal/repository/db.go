@@ -103,6 +103,11 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("failed to create messages table: %v", err)
 	}
 
+	// Add conversation scope column (all indexed files vs selected files)
+	if err := DB.Exec("ALTER TABLE conversations ADD COLUMN scope VARCHAR(20) NOT NULL DEFAULT 'files'").Error; err != nil {
+		log.Printf("conversations.scope migration: %v (may already exist)", err)
+	}
+
 	// Add chunk_count column to physical_files
 	if err := DB.Exec("ALTER TABLE physical_files ADD COLUMN chunk_count INT DEFAULT 0").Error; err != nil {
 		log.Printf("physical_files.chunk_count migration: %v (may already exist)", err)
@@ -437,6 +442,7 @@ func createConversationsTable() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
 			title VARCHAR(200),
+			scope VARCHAR(20) NOT NULL DEFAULT 'files',
 			file_ids TEXT,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL
@@ -450,6 +456,7 @@ func createConversationsTable() error {
 			id BIGINT AUTO_INCREMENT PRIMARY KEY,
 			user_id BIGINT NOT NULL,
 			title VARCHAR(200),
+			scope VARCHAR(20) NOT NULL DEFAULT 'files',
 			file_ids TEXT,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,

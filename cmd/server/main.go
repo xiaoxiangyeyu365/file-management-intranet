@@ -208,6 +208,7 @@ func main() {
 			needPwdChange.GET("/chat/conversations", chatHandler.ListConversations)
 			needPwdChange.GET("/chat/conversations/:id", chatHandler.GetConversation)
 			needPwdChange.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
+			needPwdChange.PUT("/chat/conversations/:id", chatHandler.RenameConversation)
 			needPwdChange.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
 			needPwdChange.DELETE("/chat/conversations/:id/files/:fileId", chatHandler.RemoveFile)
 			needPwdChange.POST("/chat/conversations/:id/ask", chatHandler.Ask)

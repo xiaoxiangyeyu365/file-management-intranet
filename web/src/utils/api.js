@@ -168,14 +168,21 @@ export const chatAPI = {
     api.get('/chat/conversations', { params: { limit, offset } }),
   getConversation: (id) => api.get(`/chat/conversations/${id}`),
   deleteConversation: (id) => api.delete(`/chat/conversations/${id}`),
+  renameConversation: (id, title) => api.put(`/chat/conversations/${id}`, { title }),
   addFile: (conversationId, fileId) =>
     api.post(`/chat/conversations/${conversationId}/add-file`, { fileId }),
   removeFile: (conversationId, fileId) =>
     api.delete(`/chat/conversations/${conversationId}/files/${fileId}`),
-  ask: (conversationId, question, onToken, onDone, onError, signal) => {
+  ask: (conversationId, question, onToken, onDone, onError, signal, options = {}) => {
     const token = localStorage.getItem('cloudbox_token')
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-    const url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}`
+    let url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}`
+    if (options.regenerate) {
+      url += '&regenerate=1'
+      if (options.messageId) {
+        url += `&messageId=${options.messageId}`
+      }
+    }
 
     let cancelled = false
 

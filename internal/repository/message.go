@@ -49,6 +49,14 @@ func (r *MessageRepository) DeleteByConversation(ctx context.Context, conversati
 		Delete(&model.Message{}).Error
 }
 
+// DeleteByIDAndConversation removes one assistant message, used when the user
+// regenerates an answer.
+func (r *MessageRepository) DeleteByIDAndConversation(ctx context.Context, id, conversationID int64) error {
+	return r.db.WithContext(ctx).
+		Where("id = ? AND conversation_id = ? AND role = 'assistant'", id, conversationID).
+		Delete(&model.Message{}).Error
+}
+
 func (r *MessageRepository) CountByConversation(ctx context.Context, conversationID int64) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Message{}).

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"cloudbox/internal/model"
@@ -33,6 +34,115 @@ func TestFilterChunksByScore(t *testing.T) {
 
 	if got := filterChunksByScore(chunks, 0.9); len(got) != 0 {
 		t.Fatalf("expected no chunks, got %d", len(got))
+	}
+}
+
+func TestChunkByParagraphs_ChineseRunes(t *testing.T) {
+	paragraphs := make([]string, 10)
+	for i := range paragraphs {
+		paragraphs[i] = strings.Repeat("中", 90)
+	}
+
+	chunks := chunkByParagraphs(paragraphs, 100, 500, 0)
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks for 900 runes, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if n := len([]rune(c)); n > 500 {
+			t.Fatalf("chunk %d has %d runes, exceeds max 500", i, n)
+		}
+	}
+}
+
+func TestChunkByParagraphs_SplitsOversizedParagraph(t *testing.T) {
+	chunks := chunkByParagraphs([]string{strings.Repeat("文", 1200)}, 100, 500, 0)
+	if len(chunks) < 3 {
+		t.Fatalf("expected oversized paragraph to be split, got %d chunks", len(chunks))
+	}
+	for i, c := range chunks {
+		if n := len([]rune(c)); n > 500 {
+			t.Fatalf("chunk %d has %d runes, exceeds max 500", i, n)
+		}
+	}
+}
+
+func TestBuildSearchQuery(t *testing.T) {
+	recent := []model.Message{
+		{Role: "user", Content: "第一份文档讲了什么"},
+		{Role: "assistant", Content: "讲了 A 和 B。"},
+	}
+
+	followUp := buildSearchQuery("它的结论呢", recent)
+	if !strings.Contains(followUp, "第一份文档讲了什么") || !strings.Contains(followUp, "它的结论呢") {
+		t.Fatalf("follow-up query should include previous question, got %q", followUp)
+	}
+
+	longQuestion := strings.Repeat("这是一个全新主题的长问题", 10)
+	if got := buildSearchQuery(longQuestion, recent); got != longQuestion {
+		t.Fatalf("unrelated long question should not include previous context, got %q", got)
+	}
+}
+
+func TestTrimCurrentQuestion(t *testing.T) {
+	msgs := []model.Message{
+		{Role: "user", Content: "previous"},
+		{Role: "assistant", Content: "answer"},
+		{Role: "user", Content: "current"},
+	}
+
+	trimmed := trimCurrentQuestion(msgs, "current")
+	if len(trimmed) != 2 {
+		t.Fatalf("expected current question trimmed, got %d messages", len(trimmed))
+	}
+	if got := trimCurrentQuestion(msgs, "different"); len(got) != len(msgs) {
+		t.Fatalf("unrelated question should not trim, got %d messages", len(got))
+	}
+}
+
+func TestResolvePhysicalIDs_AllScope(t *testing.T) {
+	fr := &mockFileRepo{
+		findAllByOwnerFn: func(ctx context.Context, ownerID int64) ([]model.File, error) {
+			return []model.File{
+				{ID: 1, Name: "a.txt", ContentRef: 10, Physical: &model.PhysicalFile{ChunkCount: 2}},
+				{ID: 2, Name: "b.txt", ContentRef: 11, Physical: &model.PhysicalFile{ChunkCount: 0}},
+				{ID: 3, Name: "dir", IsFolder: true},
+			}, nil
+		},
+	}
+
+	svc := &RAGService{fileRepo: fr}
+	ids, refs, err := svc.resolvePhysicalIDs(context.Background(), &model.Conversation{Scope: "all"}, 1)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != 10 {
+		t.Fatalf("expected only indexed physical 10, got %v", ids)
+	}
+	if ref := refs[10]; ref.ID != 1 || ref.Name != "a.txt" {
+		t.Fatalf("unexpected file ref: %+v", ref)
+	}
+}
+
+func TestResolvePhysicalIDs_SelectedFiles(t *testing.T) {
+	fr := &mockFileRepo{
+		findByIDAndOwnerFn: func(ctx context.Context, id, ownerID int64) (*model.File, error) {
+			if id == 7 {
+				return &model.File{ID: 7, Name: "selected.txt", ContentRef: 20, Physical: &model.PhysicalFile{ChunkCount: 1}}, nil
+			}
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+
+	svc := &RAGService{fileRepo: fr}
+	ids, refs, err := svc.resolvePhysicalIDs(context.Background(), &model.Conversation{Scope: "files", FileIDs: "[7,8]"}, 1)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != 20 {
+		t.Fatalf("expected physical 20, got %v", ids)
+	}
+	if ref := refs[20]; ref.ID != 7 {
+		t.Fatalf("unexpected file ref: %+v", ref)
 	}
 }
 

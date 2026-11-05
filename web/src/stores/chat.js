@@ -1,6 +1,22 @@
 import { defineStore } from 'pinia'
 import { chatAPI } from '@/utils/api'
 
+// Kept outside Pinia state: AbortController should not be wrapped by Vue's
+// reactivity system.
+let streamController = null
+
+// Sources are stored as a JSON string in the messages table.
+function parseSources(raw) {
+  if (!raw) return null
+  if (Array.isArray(raw)) return raw
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     conversations: [],
@@ -10,12 +26,11 @@ export const useChatStore = defineStore('chat', {
     messages: [],
     isLoading: false,
     isStreaming: false,
-    streamController: null,
     streamError: null
   }),
 
   actions: {
-    async loadConversations(limit = 20, offset = 0) {
+    async loadConversations(limit = 100, offset = 0) {
       try {
         const res = await chatAPI.listConversations(limit, offset)
         const data = res.data || res
@@ -26,8 +41,8 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async createConversation(fileIds = []) {
-      const res = await chatAPI.createConversation({ fileIds })
+    async createConversation(fileIds = [], scope = 'files') {
+      const res = await chatAPI.createConversation({ fileIds, scope })
       const conv = res.data || res
       this.conversations.unshift(conv)
       this.total++
@@ -41,7 +56,10 @@ export const useChatStore = defineStore('chat', {
         const data = res.data || res
         this.currentConversation = data.conversation
         this.currentFileIds = data.fileIds || []
-        this.messages = data.messages || []
+        this.messages = (data.messages || []).map(msg => ({
+          ...msg,
+          sources: parseSources(msg.sources)
+        }))
       } catch (e) {
         console.error('Failed to load conversation', e)
         this.currentConversation = null
@@ -50,6 +68,17 @@ export const useChatStore = defineStore('chat', {
       } finally {
         this.isLoading = false
       }
+    },
+
+    async renameConversation(id, title) {
+      const res = await chatAPI.renameConversation(id, title)
+      const conv = res.data || res
+      const item = this.conversations.find(c => c.id === id)
+      if (item) item.title = conv.title || title
+      if (this.currentConversation?.id === id) {
+        this.currentConversation.title = conv.title || title
+      }
+      return conv
     },
 
     async deleteConversation(id) {
@@ -88,7 +117,6 @@ export const useChatStore = defineStore('chat', {
     async ask(question) {
       if (!this.currentConversation || this.isStreaming) return
 
-      // Add user message locally
       this.messages.push({
         id: Date.now(),
         role: 'user',
@@ -96,7 +124,6 @@ export const useChatStore = defineStore('chat', {
         createdAt: new Date().toISOString()
       })
 
-      // Add temporary assistant message
       const msgIdx = this.messages.length
       this.messages.push({
         id: Date.now() + 1,
@@ -107,18 +134,56 @@ export const useChatStore = defineStore('chat', {
         createdAt: new Date().toISOString()
       })
 
+      await this._streamAnswer(question, msgIdx)
+    },
+
+    async regenerateLast() {
+      if (!this.currentConversation || this.isStreaming) return
+
+      let idx = -1
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        if (this.messages[i].role === 'assistant') {
+          idx = i
+          break
+        }
+      }
+      if (idx === -1) return
+
+      const previous = this.messages[idx]
+      let question = ''
+      for (let i = idx - 1; i >= 0; i--) {
+        if (this.messages[i].role === 'user') {
+          question = this.messages[i].content
+          break
+        }
+      }
+      if (!question) return
+
+      const persistedId = typeof previous.id === 'number' && previous.id < 1e12 ? previous.id : null
+      this.messages[idx] = {
+        id: Date.now(),
+        role: 'assistant',
+        content: '',
+        sources: null,
+        status: 'streaming',
+        createdAt: new Date().toISOString()
+      }
+
+      await this._streamAnswer(question, idx, { regenerate: true, messageId: persistedId })
+    },
+
+    async _streamAnswer(question, msgIdx, options = {}) {
       this.isStreaming = true
       this.streamError = null
-      this.streamController = new AbortController()
+      streamController = new AbortController()
 
       chatAPI.ask(
         this.currentConversation.id,
         question,
-        // onToken — access via store index to maintain reactivity
         (content) => {
-          this.messages[msgIdx].content += content
+          const msg = this.messages[msgIdx]
+          if (msg) msg.content += content
         },
-        // onDone
         (data) => {
           const msg = this.messages[msgIdx]
           if (!msg) return
@@ -126,9 +191,8 @@ export const useChatStore = defineStore('chat', {
           msg.status = 'done'
           msg.sources = data.sources || null
           this.isStreaming = false
-          this.streamController = null
+          streamController = null
         },
-        // onError
         (error) => {
           const msg = this.messages[msgIdx]
           if (!msg) return
@@ -136,16 +200,17 @@ export const useChatStore = defineStore('chat', {
           msg.content = error
           this.streamError = error
           this.isStreaming = false
-          this.streamController = null
+          streamController = null
         },
-        this.streamController.signal
+        streamController.signal,
+        options
       )
     },
 
     stopStreaming() {
-      if (this.streamController) {
-        this.streamController.abort()
-        this.streamController = null
+      if (streamController) {
+        streamController.abort()
+        streamController = null
       }
       this.isStreaming = false
       const last = this.messages[this.messages.length - 1]
@@ -155,17 +220,30 @@ export const useChatStore = defineStore('chat', {
     },
 
     async retryAsk() {
-      // Find last user message
-      const lastUserMsg = [...this.messages].reverse().find(m => m.role === 'user')
-      if (!lastUserMsg) return
+      const lastIdx = this.messages.length - 1
+      const last = this.messages[lastIdx]
+      if (!last || last.role !== 'assistant' || last.status !== 'error') return
 
-      // Remove failed assistant message
-      const lastMsg = this.messages[this.messages.length - 1]
-      if (lastMsg?.role === 'assistant' && lastMsg.status === 'error') {
-        this.messages.pop()
+      let question = ''
+      for (let i = lastIdx - 1; i >= 0; i--) {
+        if (this.messages[i].role === 'user') {
+          question = this.messages[i].content
+          break
+        }
+      }
+      if (!question) return
+
+      const persistedId = typeof last.id === 'number' && last.id < 1e12 ? last.id : null
+      this.messages[lastIdx] = {
+        id: Date.now(),
+        role: 'assistant',
+        content: '',
+        sources: null,
+        status: 'streaming',
+        createdAt: new Date().toISOString()
       }
 
-      await this.ask(lastUserMsg.content)
+      await this._streamAnswer(question, lastIdx, { regenerate: true, messageId: persistedId })
     }
   }
 })

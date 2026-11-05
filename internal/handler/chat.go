@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,7 @@ func NewChatHandler(ragService *service.RAGService, fileService *service.FileSer
 
 type CreateConversationRequest struct {
 	Title   string  `json:"title"`
+	Scope   string  `json:"scope"`
 	FileIDs []int64 `json:"fileIds"`
 }
 
@@ -87,6 +89,16 @@ func (h *ChatHandler) CreateConversation(c *gin.Context) {
 
 	userID := GetUserID(c)
 
+	scope := req.Scope
+	if scope != "all" {
+		scope = "files"
+	}
+	if scope == "all" {
+		// "All indexed files" is resolved at question time, so no snapshot
+		// of file ids is stored.
+		req.FileIDs = nil
+	}
+
 	// Validate file IDs — only allow indexed files
 	if len(req.FileIDs) > 0 {
 		validIDs := make([]int64, 0, len(req.FileIDs))
@@ -112,6 +124,7 @@ func (h *ChatHandler) CreateConversation(c *gin.Context) {
 	conv := &model.Conversation{
 		UserID:    userID,
 		Title:     req.Title,
+		Scope:     scope,
 		FileIDs:   fileIDsJSON,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -229,6 +242,56 @@ func (h *ChatHandler) DeleteConversation(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+type RenameConversationRequest struct {
+	Title string `json:"title" binding:"required"`
+}
+
+// RenameConversation updates a conversation title.
+func (h *ChatHandler) RenameConversation(c *gin.Context) {
+	if h.ragService == nil {
+		response.Error(c, 403, "RAG service is not enabled")
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid conversation ID")
+		return
+	}
+
+	var req RenameConversationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "title is required")
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		response.BadRequest(c, "title is required")
+		return
+	}
+	if runes := []rune(title); len(runes) > 200 {
+		title = string(runes[:200])
+	}
+
+	userID := GetUserID(c)
+	convRepo := repository.NewConversationRepository(repository.DB)
+	conv, err := convRepo.FindByIDAndUser(c.Request.Context(), id, userID)
+	if err != nil {
+		response.NotFound(c, "conversation not found")
+		return
+	}
+
+	conv.Title = title
+	conv.UpdatedAt = time.Now()
+	if err := convRepo.Update(c.Request.Context(), conv); err != nil {
+		response.InternalError(c, "failed to rename conversation")
+		return
+	}
+
+	response.Success(c, conv)
+}
+
 // AddFile adds a file to an existing conversation.
 func (h *ChatHandler) AddFile(c *gin.Context) {
 	if h.ragService == nil {
@@ -253,6 +316,11 @@ func (h *ChatHandler) AddFile(c *gin.Context) {
 	conv, err := convRepo.FindByIDAndUser(c.Request.Context(), id, userID)
 	if err != nil {
 		response.NotFound(c, "conversation not found")
+		return
+	}
+
+	if conv.Scope == "all" {
+		response.BadRequest(c, "conversation already uses all indexed files")
 		return
 	}
 
@@ -314,6 +382,11 @@ func (h *ChatHandler) RemoveFile(c *gin.Context) {
 	conv, err := convRepo.FindByIDAndUser(c.Request.Context(), id, userID)
 	if err != nil {
 		response.NotFound(c, "conversation not found")
+		return
+	}
+
+	if conv.Scope == "all" {
+		response.BadRequest(c, "conversation uses all indexed files")
 		return
 	}
 
@@ -567,24 +640,38 @@ func (h *ChatHandler) AskSSE(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 
 	msgRepo := repository.NewMessageRepository(repository.DB)
-	userMsg := &model.Message{
-		ConversationID: id,
-		Role:           "user",
-		Content:        question,
-		CreatedAt:      time.Now(),
-	}
-	msgRepo.Create(c.Request.Context(), userMsg)
 
-	msgCount, _ := msgRepo.CountByConversation(c.Request.Context(), id)
-	if msgCount <= 1 {
-		title := question
-		runes := []rune(title)
-		if len(runes) > 30 {
-			title = string(runes[:30])
+	regenerate := c.Query("regenerate") == "1" || c.Query("regenerate") == "true"
+	regenerateID, _ := strconv.ParseInt(c.Query("messageId"), 10, 64)
+
+	if regenerate {
+		// Regenerating an answer: the user message already exists, and the
+		// previous assistant answer is replaced.
+		if regenerateID > 0 {
+			if err := msgRepo.DeleteByIDAndConversation(c.Request.Context(), regenerateID, id); err != nil {
+				log.Printf("[Chat] Failed to delete regenerated message %d: %v", regenerateID, err)
+			}
 		}
-		conv.Title = title
-		conv.UpdatedAt = time.Now()
-		convRepo.Update(c.Request.Context(), conv)
+	} else {
+		userMsg := &model.Message{
+			ConversationID: id,
+			Role:           "user",
+			Content:        question,
+			CreatedAt:      time.Now(),
+		}
+		msgRepo.Create(c.Request.Context(), userMsg)
+
+		msgCount, _ := msgRepo.CountByConversation(c.Request.Context(), id)
+		if msgCount <= 1 {
+			title := question
+			runes := []rune(title)
+			if len(runes) > 30 {
+				title = string(runes[:30])
+			}
+			conv.Title = title
+			conv.UpdatedAt = time.Now()
+			convRepo.Update(c.Request.Context(), conv)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(c.Request.Context())

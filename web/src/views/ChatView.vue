@@ -22,15 +22,30 @@
           新对话
         </el-button>
       </div>
+      <div class="conversation-search">
+        <el-input
+          v-model="conversationSearch"
+          placeholder="搜索对话..."
+          size="small"
+          clearable
+        />
+      </div>
       <div class="conversation-list">
         <div
-          v-for="conv in chatStore.conversations"
+          v-for="conv in filteredConversations"
           :key="conv.id"
           class="conversation-item"
           :class="{ active: currentId === conv.id }"
           @click="selectConversation(conv.id)"
         >
           <span class="conv-title">{{ conv.title || '新对话' }}</span>
+          <el-button
+            class="rename-btn"
+            :icon="EditPen"
+            size="small"
+            text
+            @click.stop="handleRename(conv)"
+          />
           <el-button
             class="delete-btn"
             type="danger"
@@ -40,8 +55,8 @@
             @click.stop="handleDelete(conv.id)"
           />
         </div>
-        <div v-if="chatStore.conversations.length === 0" class="empty-hint">
-          暂无对话，点击上方按钮创建
+        <div v-if="filteredConversations.length === 0" class="empty-hint">
+          {{ chatStore.conversations.length === 0 ? '暂无对话，点击上方按钮创建' : '没有匹配的对话' }}
         </div>
       </div>
     </div>
@@ -49,8 +64,21 @@
     <!-- Chat Area -->
     <div class="chat-main">
       <template v-if="chatStore.currentConversation">
+        <div v-if="!isMobile" class="chat-header">
+          <div class="chat-title" :title="chatStore.currentConversation.title">
+            {{ chatStore.currentConversation.title || '新对话' }}
+          </div>
+          <el-button text size="small" :icon="EditPen" @click="handleRename(chatStore.currentConversation)">
+            重命名
+          </el-button>
+        </div>
+
         <div class="chat-files-bar">
-          <div class="conversation-files">
+          <div v-if="isAllScope" class="conversation-files">
+            <el-tag size="small" type="success">全部知识库</el-tag>
+            <span class="no-files">共 {{ availableFiles.length }} 个已索引文件</span>
+          </div>
+          <div v-else class="conversation-files">
             <el-tag
               v-for="f in conversationFiles"
               :key="f.id"
@@ -64,13 +92,39 @@
             </el-tag>
             <span v-if="conversationFiles.length === 0" class="no-files">本对话还没有关联文件</span>
           </div>
-          <el-button text size="small" :icon="FolderAdd" @click="openAddFileDialog">
+          <el-button
+            v-if="!isAllScope"
+            text
+            size="small"
+            :icon="FolderAdd"
+            @click="openAddFileDialog"
+          >
             添加文件
           </el-button>
         </div>
 
         <!-- Messages -->
         <div class="message-area" ref="messageArea">
+          <div v-if="chatStore.messages.length === 0 && !chatStore.isLoading" class="chat-welcome">
+            <div class="welcome-icon">✨</div>
+            <div class="welcome-title">开始提问</div>
+            <div class="welcome-sub">
+              {{ isAllScope ? '将基于你全部已索引的文件回答' : '将基于本对话关联的文件回答' }}
+            </div>
+            <div class="suggestions">
+              <button
+                v-for="q in suggestedQuestions"
+                :key="q"
+                type="button"
+                class="suggestion"
+                :disabled="chatStore.isStreaming"
+                @click="askSuggestion(q)"
+              >
+                {{ q }}
+              </button>
+            </div>
+          </div>
+
           <div
             v-for="msg in chatStore.messages"
             :key="msg.id"
@@ -81,8 +135,13 @@
               <div
                 v-if="msg.status !== 'error' && msg.role === 'assistant'"
                 class="message-content markdown-body"
-                v-html="renderMarkdown(msg.content)"
-              ></div>
+                @click="handleCitationClick($event, msg)"
+              >
+                <span v-if="msg.status === 'streaming' && !msg.content" class="typing-hint">
+                  正在检索文档并生成回答…
+                </span>
+                <span v-else v-html="renderMarkdown(msg.content)"></span>
+              </div>
               <div v-else-if="msg.status !== 'error'" class="message-content">{{ msg.content }}</div>
               <div v-if="msg.status === 'error'" class="message-error">
                 <el-icon :size="14"><WarningFilled /></el-icon>
@@ -96,18 +155,42 @@
               已停止生成
             </div>
             <div
-              v-if="msg.role === 'assistant' && msg.content && msg.status !== 'streaming'"
+              v-if="msg.role === 'assistant' && msg.status !== 'streaming' && (msg.content || isLastAssistant(msg))"
               class="message-actions"
             >
-              <el-button text size="small" :icon="CopyDocument" @click="copyMessage(msg)">
+              <el-button
+                v-if="msg.content"
+                text
+                size="small"
+                :icon="CopyDocument"
+                @click="copyMessage(msg)"
+              >
                 复制
               </el-button>
+              <el-button
+                v-if="isLastAssistant(msg)"
+                text
+                size="small"
+                :icon="RefreshRight"
+                @click="chatStore.regenerateLast()"
+              >
+                重新生成
+              </el-button>
+            </div>
+            <div v-if="msg.createdAt" class="message-time">
+              {{ formatMessageTime(msg.createdAt) }}
             </div>
             <!-- Sources -->
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="message-sources">
               <el-collapse>
-                <el-collapse-item title="引用来源">
-                  <div v-for="(src, i) in msg.sources" :key="i" class="source-item">
+                <el-collapse-item :title="`引用来源 (${msg.sources.length})`">
+                  <div
+                    v-for="(src, i) in msg.sources"
+                    :key="i"
+                    :id="`cite-${i + 1}`"
+                    class="source-item"
+                  >
+                    <span class="source-index">[{{ i + 1 }}]</span>
                     <button type="button" class="source-file" @click="openSource(src)">
                       {{ src.fileName || '未命名文件' }}
                     </button>
@@ -125,58 +208,84 @@
 
         <!-- Input -->
         <div class="input-area">
-          <el-input
-            v-model="inputText"
-            placeholder="输入问题..."
-            :disabled="chatStore.isStreaming"
-            @keyup.enter="handleAsk"
-          >
-            <template #append>
-              <el-button
-                v-if="chatStore.isStreaming"
-                :icon="VideoPause"
-                @click="chatStore.stopStreaming"
-              >
-                停止
-              </el-button>
-              <el-button v-else :icon="Promotion" @click="handleAsk" />
-            </template>
-          </el-input>
+          <div class="input-wrap">
+            <el-input
+              v-model="inputText"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 6 }"
+              resize="none"
+              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+              :disabled="chatStore.isStreaming"
+              @keydown="handleInputKeydown"
+            />
+            <el-button
+              v-if="chatStore.isStreaming"
+              :icon="VideoPause"
+              @click="chatStore.stopStreaming"
+            >
+              停止
+            </el-button>
+            <el-button
+              v-else
+              type="primary"
+              :icon="Promotion"
+              :disabled="!inputText.trim()"
+              @click="handleAsk"
+            />
+          </div>
         </div>
       </template>
 
       <template v-else>
         <div class="empty-state">
-          <p>选择一个对话或创建新对话开始</p>
+          <div class="empty-icon">💬</div>
+          <p class="empty-title">开始一个新的 AI 对话</p>
+          <p class="empty-sub">默认基于你全部已索引的文件回答，也可以指定文件。</p>
+          <el-button type="primary" @click="handleNewConversation">新建对话</el-button>
         </div>
       </template>
     </div>
 
     <!-- File Selection Dialog -->
-    <el-dialog v-model="fileDialogVisible" :title="fileDialogMode === 'add' ? '添加文件到对话' : '选择文件'" width="90%" :fullscreen="isMobile">
-      <el-input
-        v-model="fileSearch"
-        placeholder="搜索文件..."
-        clearable
-        class="file-search-input"
-      />
-      <div class="file-select-list">
-        <el-checkbox-group v-model="selectedFileIds">
-          <div v-for="file in filteredAvailableFiles" :key="file.id" class="file-select-item">
-            <el-checkbox :label="file.id">
-              {{ file.name }}
-              <span class="file-meta">({{ file.chunkCount }} 个片段)</span>
-            </el-checkbox>
-          </div>
-        </el-checkbox-group>
-        <div v-if="filteredAvailableFiles.length === 0" class="empty-hint">
-          {{ emptyFileHint }}
+    <el-dialog v-model="fileDialogVisible" :title="fileDialogMode === 'add' ? '添加文件到对话' : '选择文件范围'" width="90%" :fullscreen="isMobile">
+      <div v-if="fileDialogMode === 'create'" class="scope-selector">
+        <el-radio-group v-model="fileScope">
+          <el-radio-button label="all">全部知识库</el-radio-button>
+          <el-radio-button label="files">指定文件</el-radio-button>
+        </el-radio-group>
+        <div class="scope-hint">
+          {{ fileScope === 'all'
+            ? `将使用全部已索引文件（当前 ${availableFiles.length} 个），之后新索引的文件也会自动加入。`
+            : '选择本对话要使用的文件。' }}
         </div>
       </div>
+
+      <template v-if="fileDialogMode === 'add' || fileScope === 'files'">
+        <el-input
+          v-model="fileSearch"
+          placeholder="搜索文件..."
+          clearable
+          class="file-search-input"
+        />
+        <div class="file-select-list">
+          <el-checkbox-group v-model="selectedFileIds">
+            <div v-for="file in filteredAvailableFiles" :key="file.id" class="file-select-item">
+              <el-checkbox :label="file.id">
+                {{ file.name }}
+                <span class="file-meta">({{ file.chunkCount }} 个片段)</span>
+              </el-checkbox>
+            </div>
+          </el-checkbox-group>
+          <div v-if="filteredAvailableFiles.length === 0" class="empty-hint">
+            {{ emptyFileHint }}
+          </div>
+        </div>
+      </template>
       <template #footer>
         <el-button @click="fileDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmFileSelection" :disabled="selectedFileIds.length === 0">
-          {{ fileDialogMode === 'add' ? '添加' : '确定' }} ({{ selectedFileIds.length }} 个文件)
+        <el-button type="primary" @click="confirmFileSelection" :disabled="!canConfirmFileSelection">
+          {{ fileDialogMode === 'add' ? '添加' : '开始对话' }}
+          <template v-if="fileDialogMode === 'add' || fileScope === 'files'">({{ selectedFileIds.length }} 个文件)</template>
         </el-button>
       </template>
     </el-dialog>
@@ -188,12 +297,32 @@ import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { chatAPI } from '@/utils/api'
-import { Delete, Promotion, Menu, EditPen, WarningFilled, FolderAdd, CopyDocument, VideoPause } from '@element-plus/icons-vue'
+import { Delete, Promotion, Menu, EditPen, WarningFilled, FolderAdd, CopyDocument, VideoPause, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+
+// Render [1], [2] citations as clickable links. Inline rules do not run
+// inside code blocks, so array index syntax in code is left alone.
+md.inline.ruler.before('link', 'citation', (state, silent) => {
+  const start = state.pos
+  if (state.src.charCodeAt(start) !== 0x5B) return false
+  const match = /^\[(\d+)\]/.exec(state.src.slice(start, state.posMax))
+  if (!match) return false
+  if (!silent) {
+    const token = state.push('citation', '', 0)
+    token.content = match[1]
+  }
+  state.pos = start + match[0].length
+  return true
+})
+
+md.renderer.rules.citation = (tokens, idx) => {
+  const n = tokens[idx].content
+  return `<a href="#cite-${n}" class="citation" data-cite="${n}">[${n}]</a>`
+}
 
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A') {
@@ -215,6 +344,8 @@ const messageArea = ref(null)
 const fileDialogVisible = ref(false)
 const fileDialogMode = ref('create')
 const fileSearch = ref('')
+const fileScope = ref('all')
+const conversationSearch = ref('')
 const availableFiles = ref([])
 const selectedFileIds = ref([])
 const sidebarOpen = ref(false)
@@ -239,6 +370,35 @@ const filteredAvailableFiles = computed(() => {
 const conversationFiles = computed(() => {
   const byId = new Map(availableFiles.value.map(file => [file.id, file]))
   return chatStore.currentFileIds.map(id => byId.get(id)).filter(Boolean)
+})
+
+const isAllScope = computed(() => chatStore.currentConversation?.scope === 'all')
+
+const filteredConversations = computed(() => {
+  const keyword = conversationSearch.value.trim().toLowerCase()
+  if (!keyword) return chatStore.conversations
+  return chatStore.conversations.filter(conv =>
+    (conv.title || '新对话').toLowerCase().includes(keyword)
+  )
+})
+
+const suggestionFiles = computed(() => (
+  isAllScope.value ? availableFiles.value : conversationFiles.value
+))
+
+const suggestedQuestions = computed(() => {
+  const list = []
+  const names = suggestionFiles.value.slice(0, 2).map(file => file.name)
+  if (names[0]) list.push(`总结一下《${names[0]}》的主要内容`)
+  if (names[1]) list.push(`《${names[1]}》里有哪些关键结论？`)
+  list.push('这些文档主要讲了什么？')
+  return list.slice(0, 3)
+})
+
+const canConfirmFileSelection = computed(() => {
+  if (fileDialogMode.value === 'add') return selectedFileIds.value.length > 0
+  if (fileScope.value === 'all') return true
+  return selectedFileIds.value.length > 0
 })
 
 const emptyFileHint = computed(() => {
@@ -323,6 +483,7 @@ async function loadAvailableFiles(warn = false) {
 async function openFileDialog(mode) {
   sidebarOpen.value = false
   fileDialogMode.value = mode
+  fileScope.value = mode === 'add' ? 'files' : 'all'
   fileSearch.value = ''
   selectedFileIds.value = []
   await loadAvailableFiles(true)
@@ -339,7 +500,7 @@ function openAddFileDialog() {
 }
 
 async function confirmFileSelection() {
-  if (selectedFileIds.value.length === 0) return
+  if (!canConfirmFileSelection.value) return
   fileDialogVisible.value = false
 
   if (fileDialogMode.value === 'add') {
@@ -352,8 +513,11 @@ async function confirmFileSelection() {
     return
   }
 
+  const scope = fileScope.value
+  const fileIds = scope === 'all' ? [] : selectedFileIds.value
   try {
-    const conv = await chatStore.createConversation(selectedFileIds.value)
+    const conv = await chatStore.createConversation(fileIds, scope)
+    conversationSearch.value = ''
     router.push(`/chat/${conv.id}`)
   } catch (e) {
     ElMessage.error(e.response?.data?.message || e.message || '创建对话失败')
@@ -399,13 +563,57 @@ async function handleDelete(id) {
   }
 }
 
-async function handleAsk(e) {
-  // Shift+Enter: allow newlines, Enter: send
-  if (e && e.shiftKey) return
+async function handleAsk() {
   const q = inputText.value.trim()
   if (!q || chatStore.isStreaming) return
   inputText.value = ''
   await chatStore.ask(q)
+}
+
+function handleInputKeydown(e) {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+  e.preventDefault()
+  handleAsk()
+}
+
+async function askSuggestion(question) {
+  if (chatStore.isStreaming) return
+  await chatStore.ask(question)
+}
+
+function isLastAssistant(msg) {
+  return msg.role === 'assistant' && chatStore.messages[chatStore.messages.length - 1] === msg
+}
+
+function formatMessageTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function handleCitationClick(event, msg) {
+  const el = event.target.closest?.('.citation')
+  if (!el) return
+  event.preventDefault()
+  const index = Number(el.dataset.cite)
+  const source = msg.sources?.[index - 1]
+  if (source) openSource(source)
+}
+
+async function handleRename(conv) {
+  try {
+    const { value } = await ElMessageBox.prompt('输入新的对话名称', '重命名对话', {
+      inputValue: conv.title || '',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => (v && v.trim() ? true : '名称不能为空')
+    })
+    await chatStore.renameConversation(conv.id, value.trim())
+    ElMessage.success('已重命名')
+  } catch {
+    // Cancelled or failed
+  }
 }
 
 function openSource(src) {
@@ -474,6 +682,10 @@ async function copyMessage(msg) {
   }
 }
 
+.conversation-search {
+  padding: 8px 12px 0;
+}
+
 .conversation-list {
   flex: 1;
   overflow-y: auto;
@@ -506,12 +718,14 @@ async function copyMessage(msg) {
     font-size: 14px;
   }
 
-  .delete-btn {
+  .delete-btn,
+  .rename-btn {
     opacity: 0;
     transition: opacity 0.2s;
   }
 
-  &:hover .delete-btn {
+  &:hover .delete-btn,
+  &:hover .rename-btn {
     opacity: 1;
   }
 }
@@ -528,6 +742,25 @@ async function copyMessage(msg) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f0f2f5;
+  flex-shrink: 0;
+
+  .chat-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #303133;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .chat-files-bar {
@@ -559,6 +792,76 @@ async function copyMessage(msg) {
   margin-bottom: 10px;
 }
 
+.scope-selector {
+  margin-bottom: 12px;
+}
+
+.scope-hint {
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chat-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  padding: 24px;
+  text-align: center;
+
+  .welcome-icon {
+    font-size: 36px;
+  }
+
+  .welcome-title {
+    margin-top: 8px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #303133;
+  }
+
+  .welcome-sub {
+    margin-top: 4px;
+    font-size: 13px;
+    color: #909399;
+  }
+
+  .suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 520px;
+    margin-top: 18px;
+  }
+
+  .suggestion {
+    padding: 10px 14px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    background: #fafafa;
+    color: #606266;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+
+    &:hover {
+      border-color: #409eff;
+      color: #409eff;
+      background: #ecf5ff;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+  }
+}
+
 .message-area {
   flex: 1;
   overflow-y: auto;
@@ -567,12 +870,41 @@ async function copyMessage(msg) {
 }
 
 .message {
+  position: relative;
   margin-bottom: 16px;
   display: flex;
   flex-direction: column;
+  padding-left: 44px;
+
+  &::before {
+    content: 'AI';
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #e9e4ff;
+    color: #6b4eff;
+    font-size: 12px;
+    font-weight: 600;
+  }
 
   &.user {
     align-items: flex-end;
+    padding-left: 0;
+    padding-right: 44px;
+
+    &::before {
+      content: '我';
+      left: auto;
+      right: 0;
+      background: #e6f2ff;
+      color: #2b7de9;
+    }
 
     .message-bubble {
       background: #ecf5ff;
@@ -589,9 +921,27 @@ async function copyMessage(msg) {
     }
   }
 
+  &.streaming .message-bubble::after {
+    content: '▍';
+    margin-left: 2px;
+    color: #6b4eff;
+    animation: blink 1s step-end infinite;
+  }
+
   &.error .message-bubble {
     background: #fef0f0;
   }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.typing-hint {
+  color: #909399;
+  font-size: 13px;
 }
 
 .message-bubble {
@@ -692,6 +1042,18 @@ async function copyMessage(msg) {
     color: #409eff;
   }
 
+  :deep(.citation) {
+    color: #409eff;
+    font-size: 0.82em;
+    text-decoration: none;
+    vertical-align: super;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
   :deep(hr) {
     margin: 10px 0;
     border: none;
@@ -711,6 +1073,13 @@ async function copyMessage(msg) {
   max-width: 80%;
   font-size: 12px;
   color: #909399;
+}
+
+.message-time {
+  margin-top: 2px;
+  max-width: 80%;
+  font-size: 11px;
+  color: #c0c4cc;
 }
 
 .message-error {
@@ -736,6 +1105,11 @@ async function copyMessage(msg) {
   padding: 4px 0;
   font-size: 12px;
 
+  .source-index {
+    margin-right: 6px;
+    color: #909399;
+    font-variant-numeric: tabular-nums;
+  }
   .source-file {
     padding: 0;
     border: none;
@@ -767,13 +1141,44 @@ async function copyMessage(msg) {
   border-top: 1px solid #e4e7ed;
 }
 
+.input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+
+  :deep(.el-textarea) {
+    flex: 1;
+  }
+
+  :deep(.el-textarea__inner) {
+    border-radius: 10px;
+  }
+}
+
 .empty-state {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   color: #909399;
-  font-size: 16px;
+
+  .empty-icon {
+    font-size: 42px;
+  }
+
+  .empty-title {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: #606266;
+  }
+
+  .empty-sub {
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
 }
 
 .loading-hint {
@@ -864,8 +1269,9 @@ async function copyMessage(msg) {
   .conversation-item {
     padding: 14px 12px;
 
-    // Always show delete button on mobile (no hover on touch)
-    .delete-btn {
+    // Always show action buttons on mobile (no hover on touch)
+    .delete-btn,
+    .rename-btn {
       opacity: 0.6;
     }
   }
@@ -875,9 +1281,32 @@ async function copyMessage(msg) {
     min-height: 0; // allow flex child to shrink for keyboard
   }
 
+  .chat-welcome {
+    min-height: 180px;
+    padding: 16px;
+  }
+
+  .chat-files-bar {
+    padding: 8px 12px;
+  }
+
   .message-area {
     padding: 12px;
     padding-bottom: 8px;
+  }
+
+  .message {
+    padding-left: 38px;
+
+    &.user {
+      padding-right: 38px;
+    }
+
+    &::before {
+      width: 28px;
+      height: 28px;
+      font-size: 11px;
+    }
   }
 
   .message-bubble {
@@ -885,6 +1314,11 @@ async function copyMessage(msg) {
     padding: 10px 14px;
     font-size: 15px;
     border-radius: 16px;
+  }
+
+  .message-actions,
+  .message-time {
+    max-width: 88%;
   }
 
   .message-sources {
@@ -907,8 +1341,8 @@ async function copyMessage(msg) {
     padding: 0 24px;
     text-align: center;
 
-    p {
-      font-size: 14px;
+    .empty-sub {
+      font-size: 13px;
     }
   }
 

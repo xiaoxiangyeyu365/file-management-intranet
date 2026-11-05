@@ -269,6 +269,19 @@ func (s *RAGService) chunkText(text string) []string {
 	maxSize := s.cfg.ChunkMaxSize
 	overlap := s.cfg.ChunkOverlap
 
+	if maxSize <= 0 {
+		maxSize = 500
+	}
+	if minSize < 0 {
+		minSize = 0
+	}
+	if minSize > maxSize {
+		minSize = maxSize
+	}
+	if overlap < 0 || overlap >= maxSize {
+		overlap = 0
+	}
+
 	// Try paragraph splitting
 	chunks := chunkByParagraphs(strings.Split(text, "\n\n"), minSize, maxSize, overlap)
 	if len(chunks) > 1 {
@@ -285,9 +298,25 @@ func (s *RAGService) chunkText(text string) []string {
 }
 
 // chunkByParagraphs merges small paragraphs into chunks respecting min/max size constraints.
+// All size comparisons are in runes, not bytes, so CJK text is chunked at the configured size.
 func chunkByParagraphs(paragraphs []string, minSize, maxSize, overlap int) []string {
 	var result []string
 	var current strings.Builder
+	currentRunes := 0
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		chunk := current.String()
+		if len([]rune(chunk)) >= minSize || len(result) == 0 {
+			result = append(result, chunk)
+		} else {
+			result[len(result)-1] += "\n\n" + chunk
+		}
+		current.Reset()
+		currentRunes = 0
+	}
 
 	for _, p := range paragraphs {
 		p = strings.TrimSpace(p)
@@ -297,37 +326,32 @@ func chunkByParagraphs(paragraphs []string, minSize, maxSize, overlap int) []str
 
 		paragraphRunes := len([]rune(p))
 
-		if current.Len() == 0 {
+		// A single paragraph larger than maxSize must be split on its own.
+		if paragraphRunes > maxSize {
+			flush()
+			result = append(result, chunkSlidingWindow(p, minSize, maxSize, 0)...)
+			continue
+		}
+
+		if currentRunes == 0 {
 			current.WriteString(p)
+			currentRunes = paragraphRunes
 			continue
 		}
 
 		// Would adding this paragraph exceed maxSize?
-		proposedRunes := current.Len() + 1 + paragraphRunes
+		proposedRunes := currentRunes + 2 + paragraphRunes
 		if proposedRunes > maxSize {
-			// Flush current chunk
-			chunk := current.String()
-			if len([]rune(chunk)) >= minSize || len(result) == 0 {
-				result = append(result, chunk)
-			} else if len(result) > 0 {
-				result[len(result)-1] += "\n\n" + chunk
-			}
-			current.Reset()
+			flush()
 			current.WriteString(p)
+			currentRunes = paragraphRunes
 		} else {
 			current.WriteString("\n\n")
 			current.WriteString(p)
+			currentRunes = proposedRunes
 		}
 	}
-
-	if current.Len() > 0 {
-		chunk := current.String()
-		if len([]rune(chunk)) < minSize && len(result) > 0 {
-			result[len(result)-1] += "\n\n" + chunk
-		} else {
-			result = append(result, chunk)
-		}
-	}
+	flush()
 
 	// Apply overlap: prepend end of previous chunk to each subsequent chunk
 	if overlap > 0 && len(result) > 1 {
@@ -577,14 +601,25 @@ func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, ques
 		return noIndexedFilesHint, nil, nil
 	}
 
-	// 3. Query embedding
-	queryEmbeddings, err := s.embeddingCli.Embed(ctx, []string{question})
+	// 3. Recent history: used both for query condensation and the prompt.
+	maxHistory := s.cfg.MaxHistory
+	if maxHistory <= 0 {
+		maxHistory = 10
+	}
+	recentMsgs, _ := s.msgRepo.FindRecentByConversation(ctx, conversationID, maxHistory*2)
+	recentMsgs = trimCurrentQuestion(recentMsgs, question)
+
+	searchQuery := buildSearchQuery(question, recentMsgs)
+	log.Printf("[RAG] search query: %s", truncatePreview(searchQuery, 120))
+
+	// 4. Query embedding
+	queryEmbeddings, err := s.embeddingCli.Embed(ctx, []string{searchQuery})
 	if err != nil {
 		return "", nil, fmt.Errorf("embed query: %w", err)
 	}
 	queryVec := queryEmbeddings[0]
 
-	// 4. Retrieve relevant chunks
+	// 5. Retrieve relevant chunks
 	topChunks, err := s.retrieveChunks(ctx, physicalIDs, queryVec, s.cfg.TopK)
 	if err != nil {
 		return "", nil, fmt.Errorf("retrieve chunks: %w", err)
@@ -597,7 +632,7 @@ func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, ques
 		return noRelevantAnswer, nil, nil
 	}
 
-	// 5. Build sources
+	// 6. Build sources
 	sources := make([]ChatSource, 0, len(topChunks))
 	for _, tc := range topChunks {
 		ref := fileRefs[tc.chunk.PhysicalFileID]
@@ -611,10 +646,10 @@ func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, ques
 		})
 	}
 
-	// 6. Build messages
-	messages := s.buildMessages(ctx, conversationID, question, topChunks, fileRefs)
+	// 7. Build messages
+	messages := s.buildMessages(question, topChunks, fileRefs, recentMsgs)
 
-	// 7. Stream chat completion
+	// 8. Stream chat completion
 	fullContent, err := s.chatCli.ChatCompletionStream(ctx, messages, callback)
 	if err != nil {
 		return fullContent, sources, err
@@ -697,6 +732,26 @@ func sortChunksByScore(chunks []scoredChunk) {
 // resolvePhysicalIDs converts conversation file_ids to physical file IDs and
 // keeps a mapping back to the user's virtual file for citations.
 func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Conversation, userID int64) ([]int64, map[int64]chatFileRef, error) {
+	if conv.Scope == "all" {
+		files, err := s.fileRepo.FindAllByOwner(ctx, userID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("list indexed files: %w", err)
+		}
+
+		physicalIDs := make([]int64, 0, len(files))
+		fileRefs := make(map[int64]chatFileRef)
+		for _, file := range files {
+			if file.IsFolder || file.Physical == nil || file.Physical.ChunkCount == 0 {
+				continue
+			}
+			physicalIDs = append(physicalIDs, file.ContentRef)
+			if _, exists := fileRefs[file.ContentRef]; !exists {
+				fileRefs[file.ContentRef] = chatFileRef{ID: file.ID, Name: file.Name}
+			}
+		}
+		return physicalIDs, fileRefs, nil
+	}
+
 	var fileIDs []int64
 	if conv.FileIDs != "" && conv.FileIDs != "null" {
 		if err := json.Unmarshal([]byte(conv.FileIDs), &fileIDs); err != nil {
@@ -728,7 +783,7 @@ func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Convers
 }
 
 // buildMessages constructs the LLM message array for RAG.
-func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, question string, topChunks []scoredChunk, fileRefs map[int64]chatFileRef) []chatMessage {
+func (s *RAGService) buildMessages(question string, topChunks []scoredChunk, fileRefs map[int64]chatFileRef, recentMsgs []model.Message) []chatMessage {
 	var messages []chatMessage
 
 	// System message with retrieved context
@@ -743,24 +798,20 @@ func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, qu
 			contextBuilder.WriteString(fmt.Sprintf("[文档片段 %d]\n%s\n\n", i+1, tc.chunk.Content))
 		}
 	}
+	contextBuilder.WriteString("\n引用要求：请在回答中用到资料时，于相关句子后用 [1]、[2] 标注对应的文档片段编号；只能引用上面出现过的编号，不要编造。")
+	contextBuilder.WriteString("如果资料不足以回答，请明确说明缺少什么，不要凭空推测。回答使用 Markdown 组织。\n")
+
 	messages = append(messages, chatMessage{
 		Role:    "system",
 		Content: contextBuilder.String(),
 	})
 
 	// Recent conversation history
-	maxHistory := s.cfg.MaxHistory
-	if maxHistory <= 0 {
-		maxHistory = 10
-	}
-	recentMsgs, err := s.msgRepo.FindRecentByConversation(ctx, conversationID, maxHistory*2)
-	if err == nil {
-		for _, msg := range recentMsgs {
-			messages = append(messages, chatMessage{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
-		}
+	for _, msg := range recentMsgs {
+		messages = append(messages, chatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
 	}
 
 	// Current question
@@ -770,6 +821,64 @@ func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, qu
 	})
 
 	return messages
+}
+
+// trimCurrentQuestion removes the just-saved user message from the history
+// slice so it is not sent to the model twice.
+func trimCurrentQuestion(msgs []model.Message, question string) []model.Message {
+	if n := len(msgs); n > 0 &&
+		msgs[n-1].Role == "user" &&
+		strings.TrimSpace(msgs[n-1].Content) == strings.TrimSpace(question) {
+		return msgs[:n-1]
+	}
+	return msgs
+}
+
+// buildSearchQuery adds just enough conversation context for follow-up
+// questions ("那第二个呢") without biasing unrelated new topics.
+func buildSearchQuery(question string, recent []model.Message) string {
+	if !needsConversationContext(question) {
+		return question
+	}
+
+	previous := ""
+	for i := len(recent) - 1; i >= 0; i-- {
+		if recent[i].Role != "user" {
+			continue
+		}
+		content := strings.TrimSpace(recent[i].Content)
+		if content == "" || content == question {
+			continue
+		}
+		previous = content
+		break
+	}
+	if previous == "" {
+		return question
+	}
+
+	combined := previous + " " + question
+	runes := []rune(combined)
+	if len(runes) > 400 {
+		combined = string(runes[len(runes)-400:])
+	}
+	return combined
+}
+
+func needsConversationContext(question string) bool {
+	if len([]rune(question)) <= 30 {
+		return true
+	}
+	markers := []string{
+		"它", "他", "她", "这个", "那个", "这些", "那些", "上述", "前面", "刚才",
+		"继续", "再", "第二", "第三", "呢",
+	}
+	for _, m := range markers {
+		if strings.Contains(question, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncatePreview(text string, maxLen int) string {
