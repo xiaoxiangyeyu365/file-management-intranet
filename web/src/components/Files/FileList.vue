@@ -1,6 +1,7 @@
 <template>
   <div class="file-list">
     <el-table
+      ref="tableRef"
       :data="files"
       :default-sort="defaultSort"
       @row-dblclick="handleDoubleClick"
@@ -11,7 +12,7 @@
     >
       <el-table-column type="selection" width="50" />
 
-      <el-table-column label="名称" prop="name" min-width="300" sortable="custom">
+      <el-table-column label="名称" prop="name" min-width="300" :sortable="sortable ? 'custom' : false">
         <template #default="{ row }">
           <div class="file-name" @click="handleClick(row, $event)">
             <span class="file-icon">{{ getFileIcon(row) }}</span>
@@ -20,14 +21,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="大小" prop="size" width="120" sortable="custom">
+      <el-table-column label="大小" prop="size" width="120" :sortable="sortable ? 'custom' : false">
         <template #default="{ row }">
           <span v-if="row.isFolder">-</span>
           <span v-else>{{ formatSize(row.physical?.size || 0) }}</span>
         </template>
       </el-table-column>
 
-      <el-table-column label="修改时间" prop="updatedAt" width="180" sortable="custom">
+      <el-table-column label="修改时间" prop="updatedAt" width="180" :sortable="sortable ? 'custom' : false">
         <template #default="{ row }">
           <span v-if="row.updatedAt && row.updatedAt !== '0001-01-01T00:00:00Z'">{{ formatDate(row.updatedAt) }}</span>
           <span v-else>-</span>
@@ -77,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
 import { MoreFilled, Edit, Download, Right, Delete, Share } from '@element-plus/icons-vue'
@@ -86,6 +87,10 @@ const props = defineProps({
   files: {
     type: Array,
     default: () => []
+  },
+  sortable: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -93,10 +98,22 @@ const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'dele
 
 const filesStore = useFilesStore()
 
+const tableRef = ref(null)
+
 const defaultSort = computed(() => ({
   prop: filesStore.sortBy,
   order: filesStore.sortOrder === 'asc' ? 'ascending' : 'descending'
 }))
+
+// The store is the single source of truth for sorting. Mirror store changes
+// into Element Plus so the header arrows never contradict the toolbar label
+// (e.g. after picking "大小 大→小" from the dropdown).
+watch(
+  () => [filesStore.sortBy, filesStore.sortOrder],
+  ([sortBy, sortOrder]) => {
+    tableRef.value?.sort(sortBy, sortOrder === 'asc' ? 'ascending' : 'descending')
+  }
+)
 
 // Context menu state
 const contextMenuVisible = ref(false)

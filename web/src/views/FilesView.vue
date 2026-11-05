@@ -46,6 +46,7 @@
               <FileList
                 v-else
                 :files="filesStore.searchResults"
+                :sortable="false"
                 @open="handleOpenFolder"
                 @preview="handlePreviewFile"
                 @download="handleDownloadFile"
