@@ -6,9 +6,11 @@ export const useChatStore = defineStore('chat', {
     conversations: [],
     total: 0,
     currentConversation: null,
+    currentFileIds: [],
     messages: [],
     isLoading: false,
     isStreaming: false,
+    streamController: null,
     streamError: null
   }),
 
@@ -38,10 +40,12 @@ export const useChatStore = defineStore('chat', {
         const res = await chatAPI.getConversation(id)
         const data = res.data || res
         this.currentConversation = data.conversation
+        this.currentFileIds = data.fileIds || []
         this.messages = data.messages || []
       } catch (e) {
         console.error('Failed to load conversation', e)
         this.currentConversation = null
+        this.currentFileIds = []
         this.messages = []
       } finally {
         this.isLoading = false
@@ -54,6 +58,7 @@ export const useChatStore = defineStore('chat', {
       this.total--
       if (this.currentConversation?.id === id) {
         this.currentConversation = null
+        this.currentFileIds = []
         this.messages = []
       }
     },
@@ -61,6 +66,23 @@ export const useChatStore = defineStore('chat', {
     async addFile(fileId) {
       if (!this.currentConversation) return
       await chatAPI.addFile(this.currentConversation.id, fileId)
+    },
+
+    // Add files one by one (the backend rewrites file ids as JSON, so
+    // parallel requests could overwrite each other) and refresh the
+    // conversation so the file list is accurate.
+    async addFiles(fileIds) {
+      if (!this.currentConversation || !fileIds.length) return
+      for (const id of fileIds) {
+        await chatAPI.addFile(this.currentConversation.id, id)
+      }
+      await this.loadConversation(this.currentConversation.id)
+    },
+
+    async removeFile(fileId) {
+      if (!this.currentConversation) return
+      await chatAPI.removeFile(this.currentConversation.id, fileId)
+      await this.loadConversation(this.currentConversation.id)
     },
 
     async ask(question) {
@@ -87,6 +109,7 @@ export const useChatStore = defineStore('chat', {
 
       this.isStreaming = true
       this.streamError = null
+      this.streamController = new AbortController()
 
       chatAPI.ask(
         this.currentConversation.id,
@@ -103,6 +126,7 @@ export const useChatStore = defineStore('chat', {
           msg.status = 'done'
           msg.sources = data.sources || null
           this.isStreaming = false
+          this.streamController = null
         },
         // onError
         (error) => {
@@ -112,8 +136,22 @@ export const useChatStore = defineStore('chat', {
           msg.content = error
           this.streamError = error
           this.isStreaming = false
-        }
+          this.streamController = null
+        },
+        this.streamController.signal
       )
+    },
+
+    stopStreaming() {
+      if (this.streamController) {
+        this.streamController.abort()
+        this.streamController = null
+      }
+      this.isStreaming = false
+      const last = this.messages[this.messages.length - 1]
+      if (last?.role === 'assistant' && last.status === 'streaming') {
+        last.status = 'stopped'
+      }
     },
 
     async retryAsk() {

@@ -17,6 +17,14 @@
           <div class="file-name" @click="handleClick(row, $event)">
             <span class="file-icon">{{ getFileIcon(row) }}</span>
             <span class="file-text">{{ row.name }}</span>
+            <el-icon
+              v-if="row.physical?.summary"
+              class="ai-mark"
+              title="查看 AI 摘要"
+              @click.stop="emit('ai', row)"
+            >
+              <MagicStick />
+            </el-icon>
           </div>
         </template>
       </el-table-column>
@@ -35,11 +43,16 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="110" fixed="right">
         <template #default="{ row }">
-          <el-button text size="small" @click.stop="showContextMenu($event, row)">
-            <el-icon><MoreFilled /></el-icon>
-          </el-button>
+          <div class="row-actions">
+            <el-button text size="small" title="AI 摘要与索引" @click.stop="emit('ai', row)">
+              <el-icon><MagicStick /></el-icon>
+            </el-button>
+            <el-button text size="small" @click.stop="showContextMenu($event, row)">
+              <el-icon><MoreFilled /></el-icon>
+            </el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -64,6 +77,10 @@
           <el-icon><Share /></el-icon>
           <span>分享</span>
         </div>
+        <div class="context-menu-item" @click="handleAI">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 摘要</span>
+        </div>
         <div class="context-menu-item" @click="handleMove">
           <el-icon><Right /></el-icon>
           <span>移动</span>
@@ -81,7 +98,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
-import { MoreFilled, Edit, Download, Right, Delete, Share } from '@element-plus/icons-vue'
+import { MoreFilled, Edit, Download, Right, Delete, Share, MagicStick } from '@element-plus/icons-vue'
 
 const props = defineProps({
   files: {
@@ -94,7 +111,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share'])
+const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share', 'ai'])
 
 const filesStore = useFilesStore()
 
@@ -124,7 +141,7 @@ function showContextMenu(event, file) {
   contextMenuFile.value = file
   // Clamp position to viewport bounds
   const menuWidth = 160
-  const menuHeight = 200
+  const menuHeight = 250
   const x = Math.max(0, Math.min(event.clientX, window.innerWidth - menuWidth))
   const y = Math.max(0, Math.min(event.clientY, window.innerHeight - menuHeight))
   contextMenuPos.value = { x, y }
@@ -175,6 +192,13 @@ function handleDelete() {
 function handleShare() {
   if (contextMenuFile.value) {
     emit('share', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleAI() {
+  if (contextMenuFile.value) {
+    emit('ai', contextMenuFile.value)
   }
   hideContextMenu()
 }
@@ -247,7 +271,19 @@ function handleSortChange({ prop, order }) {
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      .ai-mark {
+        flex-shrink: 0;
+        color: #b37feb;
+        font-size: 14px;
+        cursor: pointer;
+      }
     }
+  }
+
+  .row-actions {
+    display: flex;
+    align-items: center;
   }
 }
 

@@ -186,8 +186,8 @@ func main() {
 		{
 			// Files
 			needPwdChange.GET("/files", fileHandler.ListFiles)
-			needPwdChange.GET("/files/search", fileHandler.SearchFiles)       // Must be before /files/:id
-			needPwdChange.GET("/files/download", fileHandler.BatchDownload)    // Must be before /:id routes
+			needPwdChange.GET("/files/search", fileHandler.SearchFiles)     // Must be before /files/:id
+			needPwdChange.GET("/files/download", fileHandler.BatchDownload) // Must be before /:id routes
 			needPwdChange.GET("/files/lookup", fileHandler.LookupFile)
 			needPwdChange.GET("/files/:id", fileHandler.GetFile)
 			needPwdChange.GET("/files/:id/download", fileHandler.DownloadFile)
@@ -209,6 +209,7 @@ func main() {
 			needPwdChange.GET("/chat/conversations/:id", chatHandler.GetConversation)
 			needPwdChange.DELETE("/chat/conversations/:id", chatHandler.DeleteConversation)
 			needPwdChange.POST("/chat/conversations/:id/add-file", chatHandler.AddFile)
+			needPwdChange.DELETE("/chat/conversations/:id/files/:fileId", chatHandler.RemoveFile)
 			needPwdChange.POST("/chat/conversations/:id/ask", chatHandler.Ask)
 			needPwdChange.GET("/chat/conversations/:id/ask", chatHandler.AskSSE)
 
@@ -264,6 +265,8 @@ func main() {
 		admin.GET("/audit-logs", adminHandler.ListAuditLogs)
 		admin.GET("/settings", settingsHandler.GetSettings)
 		admin.PUT("/settings", settingsHandler.UpdateSettings)
+		admin.GET("/ai/index-stats", chatHandler.IndexStats)
+		admin.POST("/ai/reindex-all", chatHandler.ReindexAll)
 	}
 
 	// WebDAV routes — register all WebDAV methods explicitly

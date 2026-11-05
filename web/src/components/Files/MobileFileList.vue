@@ -14,7 +14,17 @@
       <span class="file-icon">{{ getFileIcon(file) }}</span>
 
       <div class="file-info">
-        <div class="file-name">{{ file.name }}</div>
+        <div class="file-name">
+          {{ file.name }}
+          <el-icon
+            v-if="file.physical?.summary"
+            class="ai-mark"
+            title="查看 AI 摘要"
+            @click.stop="emit('ai', file)"
+          >
+            <MagicStick />
+          </el-icon>
+        </div>
         <div class="file-meta">
           <span v-if="file.isFolder">文件夹</span>
           <span v-else>{{ formatSize(file.physical?.size || 0) }}</span>
@@ -65,6 +75,10 @@
           <el-icon><Share /></el-icon>
           <span>分享</span>
         </div>
+        <div class="context-menu-item" @click="handleAI">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 摘要</span>
+        </div>
         <div class="context-menu-item" @click="handleMove">
           <el-icon><Right /></el-icon>
           <span>移动</span>
@@ -82,7 +96,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
-import { MoreFilled, Edit, Download, Right, Delete, CircleCheck, CircleCheckFilled, Share } from '@element-plus/icons-vue'
+import { MoreFilled, Edit, Download, Right, Delete, CircleCheck, CircleCheckFilled, Share, MagicStick } from '@element-plus/icons-vue'
 
 const props = defineProps({
   files: {
@@ -91,7 +105,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share'])
+const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share', 'ai'])
 
 const filesStore = useFilesStore()
 
@@ -176,7 +190,7 @@ function showContextMenu(event, file) {
   contextMenuFile.value = file
   // Clamp position to viewport to prevent overflow on narrow screens
   const menuWidth = 150
-  const menuHeight = 180
+  const menuHeight = 230
   const x = Math.min(event.clientX, window.innerWidth - menuWidth)
   const y = Math.min(event.clientY, window.innerHeight - menuHeight)
   contextMenuPos.value = { x: Math.max(0, x), y: Math.max(0, y) }
@@ -218,6 +232,11 @@ function handleDelete() {
 
 function handleShare() {
   if (contextMenuFile.value) emit('share', contextMenuFile.value)
+  hideContextMenu()
+}
+
+function handleAI() {
+  if (contextMenuFile.value) emit('ai', contextMenuFile.value)
   hideContextMenu()
 }
 
@@ -271,6 +290,14 @@ function getFileIcon(file) {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+
+      .ai-mark {
+        margin-left: 4px;
+        color: #b37feb;
+        font-size: 13px;
+        vertical-align: middle;
+        cursor: pointer;
+      }
     }
 
     .file-meta {

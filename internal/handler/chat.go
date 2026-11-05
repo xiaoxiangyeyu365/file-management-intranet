@@ -54,9 +54,9 @@ func (h *ChatHandler) ListAvailableFiles(c *gin.Context) {
 			continue
 		}
 		available = append(available, gin.H{
-			"id":        f.ID,
-			"name":      f.Name,
-			"mimeType":  f.Physical.MimeType,
+			"id":         f.ID,
+			"name":       f.Name,
+			"mimeType":   f.Physical.MimeType,
 			"chunkCount": f.Physical.ChunkCount,
 		})
 	}
@@ -290,6 +290,56 @@ func (h *ChatHandler) AddFile(c *gin.Context) {
 	response.Success(c, conv)
 }
 
+// RemoveFile removes a file from a conversation.
+func (h *ChatHandler) RemoveFile(c *gin.Context) {
+	if h.ragService == nil {
+		response.Error(c, 403, "RAG service is not enabled")
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid conversation ID")
+		return
+	}
+
+	fileID, err := strconv.ParseInt(c.Param("fileId"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid file ID")
+		return
+	}
+
+	userID := GetUserID(c)
+	convRepo := repository.NewConversationRepository(repository.DB)
+	conv, err := convRepo.FindByIDAndUser(c.Request.Context(), id, userID)
+	if err != nil {
+		response.NotFound(c, "conversation not found")
+		return
+	}
+
+	var fileIDs []int64
+	if conv.FileIDs != "" && conv.FileIDs != "null" {
+		json.Unmarshal([]byte(conv.FileIDs), &fileIDs)
+	}
+
+	filtered := make([]int64, 0, len(fileIDs))
+	for _, fid := range fileIDs {
+		if fid != fileID {
+			filtered = append(filtered, fid)
+		}
+	}
+
+	b, _ := json.Marshal(filtered)
+	conv.FileIDs = string(b)
+	conv.UpdatedAt = time.Now()
+	if err := convRepo.Update(c.Request.Context(), conv); err != nil {
+		response.InternalError(c, "failed to update conversation")
+		return
+	}
+
+	response.Success(c, conv)
+}
+
 // Ask sends a question and streams the answer via SSE.
 func (h *ChatHandler) Ask(c *gin.Context) {
 	if h.ragService == nil {
@@ -451,6 +501,36 @@ func (h *ChatHandler) ReindexFile(c *gin.Context) {
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{"status": "processing"})
+}
+
+// IndexStats returns knowledge base statistics for the admin page.
+func (h *ChatHandler) IndexStats(c *gin.Context) {
+	if h.ragService == nil {
+		response.Error(c, 403, "RAG service is not enabled")
+		return
+	}
+
+	stats, err := h.ragService.Stats(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "failed to load index stats")
+		return
+	}
+	response.Success(c, stats)
+}
+
+// ReindexAll queues all unindexed supported files for background indexing.
+func (h *ChatHandler) ReindexAll(c *gin.Context) {
+	if h.ragService == nil {
+		response.Error(c, 403, "RAG service is not enabled")
+		return
+	}
+
+	queued, err := h.ragService.ReindexAllUnindexed(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "failed to queue reindex")
+		return
+	}
+	response.Success(c, gin.H{"queued": queued})
 }
 
 // AskSSE is a GET endpoint for SSE streaming (compatible with EventSource).

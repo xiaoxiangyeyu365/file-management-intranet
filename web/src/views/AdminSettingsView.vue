@@ -55,6 +55,29 @@
                 {{ settings.rag?.enabled ? '已启用' : '未启用' }}
               </el-tag>
             </el-form-item>
+            <el-form-item label="知识库索引">
+              <div class="index-stats">
+                <span v-if="indexStats">
+                  物理文件 {{ indexStats.totalPhysical }} · 已索引 {{ indexStats.indexedFiles }}
+                  · 待索引 {{ indexStats.unindexedSupported }} · 片段 {{ indexStats.totalChunks }}
+                  · 有摘要 {{ indexStats.summarizedFiles }}
+                </span>
+                <span v-else class="form-hint">暂无统计</span>
+              </div>
+              <div class="index-actions">
+                <el-button size="small" @click="fetchIndexStats">刷新统计</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="reindexing"
+                  :disabled="!settings.rag?.enabled || !indexStats?.unindexedSupported"
+                  @click="handleReindexAll"
+                >
+                  为未索引文件建立索引
+                </el-button>
+              </div>
+              <span class="form-hint">索引在后台执行；大文件可能需要几分钟，完成后刷新统计查看。</span>
+            </el-form-item>
 
             <!-- TLS Status -->
             <el-form-item label="HTTPS (TLS)">
@@ -78,13 +101,15 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { adminAPI } from '@/utils/api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 
 const loading = ref(false)
 const saving = ref(false)
 const settings = ref({})
+const indexStats = ref(null)
+const reindexing = ref(false)
 
 const form = reactive({
   defaultQuotaGB: 10,
@@ -96,6 +121,7 @@ const form = reactive({
 
 onMounted(async () => {
   await fetchSettings()
+  fetchIndexStats()
 })
 
 async function fetchSettings() {
@@ -113,6 +139,44 @@ async function fetchSettings() {
     ElMessage.error('加载设置失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchIndexStats() {
+  try {
+    const res = await adminAPI.getIndexStats()
+    const data = res?.data || res
+    if (data && data.code !== undefined && data.code !== 0) return
+    indexStats.value = data
+  } catch (err) {
+    // RAG may be disabled; the section simply stays without stats.
+  }
+}
+
+async function handleReindexAll() {
+  try {
+    await ElMessageBox.confirm(
+      '为所有未索引的文本 / PDF / DOCX 文件建立索引？该操作会调用 embedding 接口，可能产生费用。',
+      '建立索引',
+      { confirmButtonText: '开始', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  reindexing.value = true
+  try {
+    const res = await adminAPI.reindexAll()
+    const data = res?.data || res
+    if (data && data.code !== undefined && data.code !== 0) {
+      throw new Error(data.message || '提交失败')
+    }
+    ElMessage.success(`已提交 ${data.queued ?? 0} 个文件，后台处理中`)
+    setTimeout(fetchIndexStats, 5000)
+  } catch (err) {
+    ElMessage.error(err.response?.data?.message || err.message || '提交失败')
+  } finally {
+    reindexing.value = false
   }
 }
 
@@ -177,6 +241,19 @@ async function handleSave() {
   margin-left: 12px;
   color: #909399;
   font-size: 13px;
+}
+
+.index-stats {
+  width: 100%;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.index-actions {
+  display: flex;
+  gap: 8px;
 }
 
 :deep(.el-divider__text) {

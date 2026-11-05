@@ -79,6 +79,7 @@ rag:
   embedding_batch_size: 20
   max_concurrent: 2
   top_k: 5
+  min_score: 0.25          # 低于此相似度的片段会被丢弃；无结果时明确拒答
   max_history: 10
   timeout: 30
   chat_model: ""

@@ -12,6 +12,14 @@
       <div class="file-preview">
         <span class="file-icon">{{ getFileIcon(file) }}</span>
       </div>
+      <el-icon
+        v-if="file.physical?.summary"
+        class="ai-mark"
+        title="查看 AI 摘要"
+        @click.stop="emit('ai', file)"
+      >
+        <MagicStick />
+      </el-icon>
       <div class="file-name" :title="file.name">{{ file.name }}</div>
       <div class="file-meta">
         <span class="file-size">{{ file.isFolder ? '' : formatSize(file.physical?.size || 0) }}</span>
@@ -39,6 +47,10 @@
           <el-icon><Share /></el-icon>
           <span>分享</span>
         </div>
+        <div class="context-menu-item" @click="handleAI">
+          <el-icon><MagicStick /></el-icon>
+          <span>AI 摘要</span>
+        </div>
         <div class="context-menu-item" @click="handleMove">
           <el-icon><Right /></el-icon>
           <span>移动</span>
@@ -60,7 +72,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFilesStore } from '@/stores/files'
 import { formatSize, formatDate } from '@/utils/format'
-import { Edit, Download, Right, Delete, Share } from '@element-plus/icons-vue'
+import { Edit, Download, Right, Delete, Share, MagicStick } from '@element-plus/icons-vue'
 
 const props = defineProps({
   files: {
@@ -69,7 +81,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share'])
+const emit = defineEmits(['open', 'preview', 'rename', 'download', 'move', 'delete', 'share', 'ai'])
 
 const filesStore = useFilesStore()
 const selectedIds = computed(() => filesStore.selectedIds)
@@ -83,7 +95,7 @@ function showContextMenu(event, file) {
   contextMenuFile.value = file
   // Clamp position to viewport bounds
   const menuWidth = 160
-  const menuHeight = 200
+  const menuHeight = 250
   const x = Math.max(0, Math.min(event.clientX, window.innerWidth - menuWidth))
   const y = Math.max(0, Math.min(event.clientY, window.innerHeight - menuHeight))
   contextMenuPos.value = { x, y }
@@ -134,6 +146,13 @@ function handleDelete() {
 function handleShare() {
   if (contextMenuFile.value) {
     emit('share', contextMenuFile.value)
+  }
+  hideContextMenu()
+}
+
+function handleAI() {
+  if (contextMenuFile.value) {
+    emit('ai', contextMenuFile.value)
   }
   hideContextMenu()
 }
@@ -194,6 +213,15 @@ function handleDoubleClick(file) {
     &.selected {
       background: #ecf5ff;
       border-color: #409eff;
+    }
+
+    .ai-mark {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      color: #b37feb;
+      font-size: 16px;
+      cursor: pointer;
     }
 
     .file-preview {

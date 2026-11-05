@@ -49,6 +49,26 @@
     <!-- Chat Area -->
     <div class="chat-main">
       <template v-if="chatStore.currentConversation">
+        <div class="chat-files-bar">
+          <div class="conversation-files">
+            <el-tag
+              v-for="f in conversationFiles"
+              :key="f.id"
+              size="small"
+              type="info"
+              class="conversation-file-tag"
+              closable
+              @close="handleRemoveFile(f)"
+            >
+              {{ f.name }}
+            </el-tag>
+            <span v-if="conversationFiles.length === 0" class="no-files">本对话还没有关联文件</span>
+          </div>
+          <el-button text size="small" :icon="FolderAdd" @click="openAddFileDialog">
+            添加文件
+          </el-button>
+        </div>
+
         <!-- Messages -->
         <div class="message-area" ref="messageArea">
           <div
@@ -58,7 +78,12 @@
             :class="[msg.role, msg.status]"
           >
             <div class="message-bubble">
-              <div v-if="msg.status !== 'error'" class="message-content">{{ msg.content }}</div>
+              <div
+                v-if="msg.status !== 'error' && msg.role === 'assistant'"
+                class="message-content markdown-body"
+                v-html="renderMarkdown(msg.content)"
+              ></div>
+              <div v-else-if="msg.status !== 'error'" class="message-content">{{ msg.content }}</div>
               <div v-if="msg.status === 'error'" class="message-error">
                 <el-icon :size="14"><WarningFilled /></el-icon>
                 <span>{{ msg.content || '回复中断' }}</span>
@@ -67,12 +92,28 @@
                 </el-button>
               </div>
             </div>
+            <div v-if="msg.role === 'assistant' && msg.status === 'stopped'" class="message-stopped">
+              已停止生成
+            </div>
+            <div
+              v-if="msg.role === 'assistant' && msg.content && msg.status !== 'streaming'"
+              class="message-actions"
+            >
+              <el-button text size="small" :icon="CopyDocument" @click="copyMessage(msg)">
+                复制
+              </el-button>
+            </div>
             <!-- Sources -->
             <div v-if="msg.role === 'assistant' && msg.sources?.length" class="message-sources">
               <el-collapse>
                 <el-collapse-item title="引用来源">
                   <div v-for="(src, i) in msg.sources" :key="i" class="source-item">
-                    <span class="source-file">{{ src.fileName }}</span>
+                    <button type="button" class="source-file" @click="openSource(src)">
+                      {{ src.fileName || '未命名文件' }}
+                    </button>
+                    <span v-if="src.score != null" class="source-score">
+                      {{ Math.round(src.score * 100) }}%
+                    </span>
                     <span class="source-preview">{{ src.preview }}</span>
                   </div>
                 </el-collapse-item>
@@ -92,10 +133,13 @@
           >
             <template #append>
               <el-button
-                :icon="Promotion"
-                :loading="chatStore.isStreaming"
-                @click="handleAsk"
-              />
+                v-if="chatStore.isStreaming"
+                :icon="VideoPause"
+                @click="chatStore.stopStreaming"
+              >
+                停止
+              </el-button>
+              <el-button v-else :icon="Promotion" @click="handleAsk" />
             </template>
           </el-input>
         </div>
@@ -109,22 +153,30 @@
     </div>
 
     <!-- File Selection Dialog -->
-    <el-dialog v-model="fileDialogVisible" title="选择文件" width="90%" :fullscreen="isMobile">
+    <el-dialog v-model="fileDialogVisible" :title="fileDialogMode === 'add' ? '添加文件到对话' : '选择文件'" width="90%" :fullscreen="isMobile">
+      <el-input
+        v-model="fileSearch"
+        placeholder="搜索文件..."
+        clearable
+        class="file-search-input"
+      />
       <div class="file-select-list">
         <el-checkbox-group v-model="selectedFileIds">
-          <div v-for="file in availableFiles" :key="file.id" class="file-select-item">
+          <div v-for="file in filteredAvailableFiles" :key="file.id" class="file-select-item">
             <el-checkbox :label="file.id">
               {{ file.name }}
               <span class="file-meta">({{ file.chunkCount }} 个片段)</span>
             </el-checkbox>
           </div>
         </el-checkbox-group>
-        <div v-if="availableFiles.length === 0" class="empty-hint">暂无可用的已索引文件，请先上传文档</div>
+        <div v-if="filteredAvailableFiles.length === 0" class="empty-hint">
+          {{ emptyFileHint }}
+        </div>
       </div>
       <template #footer>
         <el-button @click="fileDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="confirmFileSelection" :disabled="selectedFileIds.length === 0">
-          确定 ({{ selectedFileIds.length }} 个文件)
+          {{ fileDialogMode === 'add' ? '添加' : '确定' }} ({{ selectedFileIds.length }} 个文件)
         </el-button>
       </template>
     </el-dialog>
@@ -136,8 +188,23 @@ import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { chatAPI } from '@/utils/api'
-import { Delete, Promotion, Menu, EditPen, WarningFilled } from '@element-plus/icons-vue'
-import { ElMessageBox } from 'element-plus'
+import { Delete, Promotion, Menu, EditPen, WarningFilled, FolderAdd, CopyDocument, VideoPause } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import MarkdownIt from 'markdown-it'
+import DOMPurify from 'dompurify'
+
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A') {
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
+  }
+})
+
+function renderMarkdown(text) {
+  return DOMPurify.sanitize(md.render(text || ''))
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -146,6 +213,8 @@ const chatStore = useChatStore()
 const inputText = ref('')
 const messageArea = ref(null)
 const fileDialogVisible = ref(false)
+const fileDialogMode = ref('create')
+const fileSearch = ref('')
 const availableFiles = ref([])
 const selectedFileIds = ref([])
 const sidebarOpen = ref(false)
@@ -157,6 +226,28 @@ const currentId = computed(() => {
   return id ? parseInt(id) : null
 })
 
+const filteredAvailableFiles = computed(() => {
+  const keyword = fileSearch.value.trim().toLowerCase()
+  return availableFiles.value.filter(file => {
+    if (fileDialogMode.value === 'add' && chatStore.currentFileIds.includes(file.id)) {
+      return false
+    }
+    return !keyword || file.name.toLowerCase().includes(keyword)
+  })
+})
+
+const conversationFiles = computed(() => {
+  const byId = new Map(availableFiles.value.map(file => [file.id, file]))
+  return chatStore.currentFileIds.map(id => byId.get(id)).filter(Boolean)
+})
+
+const emptyFileHint = computed(() => {
+  if (availableFiles.value.length === 0) return '暂无可用的已索引文件，请先上传文档'
+  if (fileSearch.value.trim()) return '没有匹配的文件'
+  if (fileDialogMode.value === 'add') return '该对话已包含全部可用文件'
+  return '没有可选择的文件'
+})
+
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
@@ -164,6 +255,7 @@ function updateIsMobile() {
 onMounted(() => {
   window.addEventListener('resize', updateIsMobile)
   chatStore.loadConversations()
+  loadAvailableFiles()
   if (currentId.value) {
     chatStore.loadConversation(currentId.value)
   }
@@ -212,23 +304,79 @@ function scrollToBottom() {
   })
 }
 
-async function handleNewConversation() {
-  sidebarOpen.value = false
+async function loadAvailableFiles(warn = false) {
   try {
     const res = await chatAPI.availableFiles()
     const data = res.data || res
+    if (data && data.code !== undefined && data.code !== 0) {
+      if (warn) ElMessage.warning(data.message || '无法加载可用文件')
+      availableFiles.value = []
+      return
+    }
     availableFiles.value = data.files || []
-    selectedFileIds.value = []
-    fileDialogVisible.value = true
   } catch (e) {
     console.error('Failed to load available files', e)
+    if (warn) ElMessage.error(e.response?.data?.message || '无法加载可用文件')
   }
 }
 
+async function openFileDialog(mode) {
+  sidebarOpen.value = false
+  fileDialogMode.value = mode
+  fileSearch.value = ''
+  selectedFileIds.value = []
+  await loadAvailableFiles(true)
+  fileDialogVisible.value = true
+}
+
+function handleNewConversation() {
+  return openFileDialog('create')
+}
+
+function openAddFileDialog() {
+  if (!chatStore.currentConversation) return
+  return openFileDialog('add')
+}
+
 async function confirmFileSelection() {
+  if (selectedFileIds.value.length === 0) return
   fileDialogVisible.value = false
-  const conv = await chatStore.createConversation(selectedFileIds.value)
-  router.push(`/chat/${conv.id}`)
+
+  if (fileDialogMode.value === 'add') {
+    try {
+      await chatStore.addFiles(selectedFileIds.value)
+      ElMessage.success('已添加文件')
+    } catch (e) {
+      ElMessage.error(e.response?.data?.message || e.message || '添加文件失败')
+    }
+    return
+  }
+
+  try {
+    const conv = await chatStore.createConversation(selectedFileIds.value)
+    router.push(`/chat/${conv.id}`)
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '创建对话失败')
+  }
+}
+
+async function handleRemoveFile(file) {
+  try {
+    await ElMessageBox.confirm(`从对话中移除「${file.name}」？`, '移除文件', {
+      confirmButtonText: '移除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await chatStore.removeFile(file.id)
+    ElMessage.success('已移除')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '移除失败')
+  }
 }
 
 function selectConversation(id) {
@@ -258,6 +406,31 @@ async function handleAsk(e) {
   if (!q || chatStore.isStreaming) return
   inputText.value = ''
   await chatStore.ask(q)
+}
+
+function openSource(src) {
+  if (!src?.fileId) return
+  router.push({ path: '/', query: { preview: String(src.fileId) } })
+}
+
+async function copyMessage(msg) {
+  const text = msg.content || ''
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    ElMessage.success('已复制')
+  } catch (e) {
+    ElMessage.error('复制失败')
+  }
 }
 </script>
 
@@ -357,6 +530,35 @@ async function handleAsk(e) {
   min-width: 0;
 }
 
+.chat-files-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f0f2f5;
+  background: #fff;
+  flex-shrink: 0;
+
+  .conversation-files {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .no-files {
+    font-size: 12px;
+    color: #909399;
+  }
+}
+
+.file-search-input {
+  margin-bottom: 10px;
+}
+
 .message-area {
   flex: 1;
   overflow-y: auto;
@@ -402,6 +604,115 @@ async function handleAsk(e) {
   word-break: break-word;
 }
 
+.message-content.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body {
+  :deep(p) {
+    margin: 0 0 8px;
+  }
+
+  :deep(p:last-child) {
+    margin-bottom: 0;
+  }
+
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
+    margin: 12px 0 6px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :deep(h1) { font-size: 18px; }
+  :deep(h2) { font-size: 16px; }
+  :deep(h3), :deep(h4) { font-size: 15px; }
+
+  :deep(ul),
+  :deep(ol) {
+    margin: 6px 0;
+    padding-left: 22px;
+  }
+
+  :deep(li) {
+    margin: 2px 0;
+  }
+
+  :deep(code) {
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: #e9ecef;
+    font-family: Consolas, Monaco, 'Courier New', monospace;
+    font-size: 12.5px;
+  }
+
+  :deep(pre) {
+    margin: 8px 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    overflow-x: auto;
+  }
+
+  :deep(pre code) {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 12.5px;
+  }
+
+  :deep(blockquote) {
+    margin: 8px 0;
+    padding-left: 10px;
+    border-left: 3px solid #dcdfe6;
+    color: #606266;
+  }
+
+  :deep(table) {
+    margin: 8px 0;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  :deep(th),
+  :deep(td) {
+    border: 1px solid #dcdfe6;
+    padding: 4px 8px;
+    text-align: left;
+  }
+
+  :deep(th) {
+    background: #f5f7fa;
+  }
+
+  :deep(a) {
+    color: #409eff;
+  }
+
+  :deep(hr) {
+    margin: 10px 0;
+    border: none;
+    border-top: 1px solid #dcdfe6;
+  }
+}
+
+.message-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 80%;
+}
+
+.message-stopped {
+  margin-top: 4px;
+  max-width: 80%;
+  font-size: 12px;
+  color: #909399;
+}
+
 .message-error {
   margin-top: 8px;
   color: #f56c6c;
@@ -426,9 +737,24 @@ async function handleAsk(e) {
   font-size: 12px;
 
   .source-file {
+    padding: 0;
+    border: none;
+    background: none;
     color: #409eff;
     margin-right: 8px;
+    font: inherit;
     font-weight: 500;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .source-score {
+    margin-right: 8px;
+    color: #67c23a;
+    font-variant-numeric: tabular-nums;
   }
 
   .source-preview {

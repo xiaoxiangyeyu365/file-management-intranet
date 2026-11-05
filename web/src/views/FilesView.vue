@@ -42,6 +42,7 @@
                 @move="handleMove"
                 @delete="handleDelete"
                 @share="handleShareFile"
+                @ai="handleAI"
               />
               <FileList
                 v-else
@@ -54,6 +55,7 @@
                 @move="handleMove"
                 @delete="handleDelete"
                 @share="handleShareFile"
+                @ai="handleAI"
               />
             </div>
           </template>
@@ -69,6 +71,7 @@
               @move="handleMove"
               @delete="handleDelete"
               @share="handleShareFile"
+              @ai="handleAI"
             />
             <template v-else>
               <FileGrid
@@ -81,6 +84,7 @@
                 @move="handleMove"
                 @delete="handleDelete"
                 @share="handleShareFile"
+                @ai="handleAI"
               />
               <FileList
                 v-else
@@ -92,6 +96,7 @@
                 @move="handleMove"
                 @delete="handleDelete"
                 @share="handleShareFile"
+                @ai="handleAI"
               />
             </template>
           </template>
@@ -153,6 +158,12 @@
       :file="shareFile"
     />
 
+    <FileAIDialog
+      v-model="showAIDialog"
+      :file="aiFile"
+      @updated="handleAIUpdated"
+    />
+
     <!-- Drag overlay -->
     <div v-if="isDragging" class="drag-overlay">
       <div class="drag-content">
@@ -170,9 +181,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useFilesStore } from '@/stores/files'
 import { useUploadStore } from '@/stores/upload'
+import { fileAPI } from '@/utils/api'
 import AppHeader from '@/components/Layout/AppHeader.vue'
 import AppSidebar from '@/components/Layout/AppSidebar.vue'
 import Breadcrumb from '@/components/Files/Breadcrumb.vue'
@@ -188,6 +201,7 @@ import RenameDialog from '@/components/Dialogs/RenameDialog.vue'
 import MoveDialog from '@/components/Dialogs/MoveDialog.vue'
 import ConfirmDialog from '@/components/Dialogs/ConfirmDialog.vue'
 import CreateShareDialog from '@/components/Dialogs/CreateShareDialog.vue'
+import FileAIDialog from '@/components/Dialogs/FileAIDialog.vue'
 import BatchActionBar from '@/components/Files/BatchActionBar.vue'
 import MobileFileList from '@/components/Files/MobileFileList.vue'
 import { useResponsive } from '@/composables/useResponsive'
@@ -197,6 +211,8 @@ import { Close, Loading } from '@element-plus/icons-vue'
 const filesStore = useFilesStore()
 const uploadStore = useUploadStore()
 const { isMobile } = useResponsive()
+const route = useRoute()
+const router = useRouter()
 
 // Dialog states
 const showCreateFolder = ref(false)
@@ -207,6 +223,8 @@ const showImagePreview = ref(false)
 const showDocPreview = ref(false)
 const showShareDialog = ref(false)
 const shareFile = ref(null)
+const showAIDialog = ref(false)
+const aiFile = ref(null)
 
 // Selection states
 const selectedFile = ref(null)
@@ -224,6 +242,32 @@ onMounted(() => {
   document.addEventListener('drop', handleDocumentDrop)
   document.addEventListener('keydown', handleKeyboardShortcut)
 })
+
+// Open a file preview when arriving from an AI citation
+// (/chat → /?preview=<fileId>).
+watch(
+  () => route.query.preview,
+  async (rawId) => {
+    if (!rawId) return
+    const id = Array.isArray(rawId) ? rawId[0] : rawId
+    try {
+      const res = await fileAPI.get(Number(id))
+      const file = res?.data || res
+      if (file && file.code === undefined && file.isFolder) {
+        await filesStore.navigateToFolder(file)
+      } else if (file && file.code === undefined) {
+        handlePreviewFile(file)
+      } else {
+        ElMessage.error(file?.message || '无法打开引用文件')
+      }
+    } catch (e) {
+      ElMessage.error('无法打开引用文件')
+    } finally {
+      router.replace({ path: '/', query: {} })
+    }
+  },
+  { immediate: true }
+)
 
 onUnmounted(() => {
   document.removeEventListener('dragenter', handleDragEnter)
@@ -318,6 +362,19 @@ function handleDownloadFile(file) {
 function handleShareFile(file) {
   shareFile.value = file
   showShareDialog.value = true
+}
+
+function handleAI(file) {
+  aiFile.value = file
+  showAIDialog.value = true
+}
+
+function handleAIUpdated() {
+  if (filesStore.isSearching) {
+    filesStore.searchFiles(filesStore.searchKeyword, filesStore.searchScope, filesStore.searchSort)
+  } else {
+    filesStore.fetchPage(filesStore.pagination.page, { silent: true, keepSelection: true })
+  }
 }
 
 // Preview

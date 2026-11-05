@@ -129,6 +129,7 @@ type RAGConfig struct {
 	EmbeddingBatchSize  int    `yaml:"embedding_batch_size"`
 	MaxConcurrent       int    `yaml:"max_concurrent"`
 	TopK                int    `yaml:"top_k"`
+	MinScore            float64 `yaml:"min_score"`
 	MaxHistory          int    `yaml:"max_history"`
 	Timeout             int    `yaml:"timeout"`
 	ChatModel           string `yaml:"chat_model"`
@@ -224,6 +225,7 @@ func Load() *Config {
 				EmbeddingBatchSize:  20,
 				MaxConcurrent:       2,
 				TopK:                5,
+				MinScore:            0.25,
 				MaxHistory:          10,
 				Timeout:             30,
 				ChatModel:           "",

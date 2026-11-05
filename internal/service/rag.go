@@ -248,7 +248,7 @@ func (s *RAGService) extractContent(pf *model.PhysicalFile, mimeType string) (st
 		}
 	}
 
-	if !isDocumentType(mimeType) {
+	if !isRAGSupported(mimeType) {
 		return "", fmt.Errorf("unsupported mime type for RAG: %s", mimeType)
 	}
 
@@ -433,10 +433,23 @@ func estimateTokens(text string) int {
 
 // ChatSource represents a citation in an AI response.
 type ChatSource struct {
-	ChunkID  int64  `json:"chunkId"`
-	FileID   int64  `json:"fileId"`
-	FileName string `json:"fileName"`
-	Preview  string `json:"preview"`
+	ChunkID    int64   `json:"chunkId"`
+	FileID     int64   `json:"fileId"`
+	FileName   string  `json:"fileName"`
+	Preview    string  `json:"preview"`
+	Score      float64 `json:"score"`
+	ChunkIndex int     `json:"chunkIndex"`
+}
+
+const (
+	noRelevantAnswer   = "根据当前对话关联的文档，没有找到与该问题足够相关的内容。可以尝试换个问法，或添加更相关的文件。"
+	noIndexedFilesHint = "这个对话还没有关联已索引的文件。请先在文件详情中重建索引，或添加其他已索引文件。"
+)
+
+// chatFileRef maps a physical file back to one of the user's virtual files.
+type chatFileRef struct {
+	ID   int64
+	Name string
 }
 
 // Reindex forces re-indexing of a file (delete existing chunks, re-index).
@@ -461,6 +474,88 @@ func (s *RAGService) Reindex(ctx context.Context, physicalID int64, mimeType str
 	return s.indexFile(ctx, pf, mimeType)
 }
 
+// IsIndexable reports whether the RAG pipeline supports this file type.
+func IsIndexable(mimeType, storagePath string) bool {
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = detectMimeTypeFromPath(storagePath)
+	}
+	return isRAGSupported(mimeType)
+}
+
+func isRAGSupported(mimeType string) bool {
+	return strings.HasPrefix(mimeType, "text/") || isPDFType(mimeType) || isDOCXType(mimeType)
+}
+
+// IndexStats summarizes the knowledge base state for the admin page.
+type IndexStats struct {
+	TotalPhysical      int   `json:"totalPhysical"`
+	IndexedFiles       int   `json:"indexedFiles"`
+	UnindexedSupported int   `json:"unindexedSupported"`
+	TotalChunks        int64 `json:"totalChunks"`
+	SummarizedFiles    int   `json:"summarizedFiles"`
+}
+
+// Stats returns aggregate indexing/summary counts.
+func (s *RAGService) Stats(ctx context.Context) (*IndexStats, error) {
+	if s == nil {
+		return nil, fmt.Errorf("RAG service is not enabled")
+	}
+
+	var files []model.PhysicalFile
+	if err := repository.DB.WithContext(ctx).Find(&files).Error; err != nil {
+		return nil, err
+	}
+
+	stats := &IndexStats{TotalPhysical: len(files)}
+	for _, pf := range files {
+		stats.TotalChunks += int64(pf.ChunkCount)
+		if pf.ChunkCount > 0 {
+			stats.IndexedFiles++
+		} else if IsIndexable(pf.MimeType, pf.StoragePath) {
+			stats.UnindexedSupported++
+		}
+		if pf.Summary != "" {
+			stats.SummarizedFiles++
+		}
+	}
+	return stats, nil
+}
+
+// ReindexAllUnindexed queues every supported physical file that has no chunks.
+// The actual embedding work runs in the background through the shared semaphore.
+func (s *RAGService) ReindexAllUnindexed(ctx context.Context) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("RAG service is not enabled")
+	}
+
+	var files []model.PhysicalFile
+	if err := repository.DB.WithContext(ctx).Where("chunk_count = 0").Find(&files).Error; err != nil {
+		return 0, err
+	}
+
+	queued := 0
+	for _, pf := range files {
+		if !IsIndexable(pf.MimeType, pf.StoragePath) {
+			continue
+		}
+		pf := pf
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.sem <- struct{}{}
+			defer func() { <-s.sem }()
+
+			if err := s.Reindex(context.Background(), pf.ID, pf.MimeType); err != nil {
+				log.Printf("[RAG] Bulk reindex failed for physical %d (%s): %v", pf.ID, pf.StoragePath, err)
+			}
+		}()
+		queued++
+	}
+
+	log.Printf("[RAG] Queued %d unindexed file(s) for indexing", queued)
+	return queued, nil
+}
+
 // Ask performs RAG Q&A with streaming output. Returns the full response text and sources.
 func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, question string, callback StreamCallback) (string, []ChatSource, error) {
 	// 1. Get conversation
@@ -470,13 +565,16 @@ func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, ques
 	}
 
 	// 2. Resolve file IDs to physical file IDs
-	physicalIDs, fileNames, err := s.resolvePhysicalIDs(ctx, conv, userID)
+	physicalIDs, fileRefs, err := s.resolvePhysicalIDs(ctx, conv, userID)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve file IDs: %w", err)
 	}
 
 	if len(physicalIDs) == 0 {
-		return "", nil, fmt.Errorf("no indexed files in this conversation")
+		if callback != nil {
+			_ = callback(noIndexedFilesHint)
+		}
+		return noIndexedFilesHint, nil, nil
 	}
 
 	// 3. Query embedding
@@ -493,22 +591,28 @@ func (s *RAGService) Ask(ctx context.Context, conversationID, userID int64, ques
 	}
 
 	if len(topChunks) == 0 {
-		return "", nil, fmt.Errorf("no relevant content found")
+		if callback != nil {
+			_ = callback(noRelevantAnswer)
+		}
+		return noRelevantAnswer, nil, nil
 	}
 
 	// 5. Build sources
 	sources := make([]ChatSource, 0, len(topChunks))
 	for _, tc := range topChunks {
+		ref := fileRefs[tc.chunk.PhysicalFileID]
 		sources = append(sources, ChatSource{
-			ChunkID:  tc.chunk.ID,
-			FileID:   tc.chunk.PhysicalFileID,
-			FileName: fileNames[tc.chunk.PhysicalFileID],
-			Preview:  truncatePreview(tc.chunk.Content, 100),
+			ChunkID:    tc.chunk.ID,
+			FileID:     ref.ID,
+			FileName:   ref.Name,
+			Preview:    truncatePreview(tc.chunk.Content, 240),
+			Score:      tc.score,
+			ChunkIndex: tc.chunk.ChunkIndex,
 		})
 	}
 
 	// 6. Build messages
-	messages := s.buildMessages(ctx, conversationID, question, topChunks)
+	messages := s.buildMessages(ctx, conversationID, question, topChunks, fileRefs)
 
 	// 7. Stream chat completion
 	fullContent, err := s.chatCli.ChatCompletionStream(ctx, messages, callback)
@@ -542,6 +646,11 @@ func (s *RAGService) retrieveChunks(ctx context.Context, physicalIDs []int64, qu
 		scored = append(scored, scoredChunk{chunk: chunk, score: score})
 	}
 
+	// Drop chunks that are not similar enough to the question. Without this
+	// the model always receives topK chunks, even for unrelated questions.
+	totalChunks := len(scored)
+	scored = filterChunksByScore(scored, s.cfg.MinScore)
+
 	// Sort by score descending
 	sortChunksByScore(scored)
 
@@ -550,7 +659,26 @@ func (s *RAGService) retrieveChunks(ctx context.Context, physicalIDs []int64, qu
 		scored = scored[:topK]
 	}
 
+	if len(scored) > 0 {
+		log.Printf("[RAG] retrieved %d/%d chunks above min_score=%.2f (top=%.3f)", len(scored), totalChunks, s.cfg.MinScore, scored[0].score)
+	} else {
+		log.Printf("[RAG] no chunks above min_score=%.2f (candidates=%d)", s.cfg.MinScore, totalChunks)
+	}
+
 	return scored, nil
+}
+
+func filterChunksByScore(chunks []scoredChunk, minScore float64) []scoredChunk {
+	if minScore <= 0 {
+		return chunks
+	}
+	filtered := make([]scoredChunk, 0, len(chunks))
+	for _, c := range chunks {
+		if c.score >= minScore {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
 }
 
 func sortChunksByScore(chunks []scoredChunk) {
@@ -566,8 +694,9 @@ func sortChunksByScore(chunks []scoredChunk) {
 	}
 }
 
-// resolvePhysicalIDs converts conversation file_ids to physical file IDs.
-func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Conversation, userID int64) ([]int64, map[int64]string, error) {
+// resolvePhysicalIDs converts conversation file_ids to physical file IDs and
+// keeps a mapping back to the user's virtual file for citations.
+func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Conversation, userID int64) ([]int64, map[int64]chatFileRef, error) {
 	var fileIDs []int64
 	if conv.FileIDs != "" && conv.FileIDs != "null" {
 		if err := json.Unmarshal([]byte(conv.FileIDs), &fileIDs); err != nil {
@@ -580,7 +709,7 @@ func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Convers
 	}
 
 	physicalIDs := make([]int64, 0, len(fileIDs))
-	fileNames := make(map[int64]string) // physicalID -> fileName
+	fileRefs := make(map[int64]chatFileRef) // physicalID -> virtual file
 	for _, fid := range fileIDs {
 		file, err := s.fileRepo.FindByIDAndOwner(ctx, fid, userID)
 		if err != nil {
@@ -590,14 +719,16 @@ func (s *RAGService) resolvePhysicalIDs(ctx context.Context, conv *model.Convers
 			continue // skip unindexed files
 		}
 		physicalIDs = append(physicalIDs, file.ContentRef)
-		fileNames[file.ContentRef] = file.Name
+		if _, exists := fileRefs[file.ContentRef]; !exists {
+			fileRefs[file.ContentRef] = chatFileRef{ID: file.ID, Name: file.Name}
+		}
 	}
 
-	return physicalIDs, fileNames, nil
+	return physicalIDs, fileRefs, nil
 }
 
 // buildMessages constructs the LLM message array for RAG.
-func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, question string, topChunks []scoredChunk) []chatMessage {
+func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, question string, topChunks []scoredChunk, fileRefs map[int64]chatFileRef) []chatMessage {
 	var messages []chatMessage
 
 	// System message with retrieved context
@@ -605,7 +736,12 @@ func (s *RAGService) buildMessages(ctx context.Context, conversationID int64, qu
 	contextBuilder.WriteString(s.cfg.SystemPrompt)
 	contextBuilder.WriteString("\n\n---\n以下是与问题相关的文档内容：\n\n")
 	for i, tc := range topChunks {
-		contextBuilder.WriteString(fmt.Sprintf("[文档片段 %d]\n%s\n\n", i+1, tc.chunk.Content))
+		ref := fileRefs[tc.chunk.PhysicalFileID]
+		if ref.Name != "" {
+			contextBuilder.WriteString(fmt.Sprintf("[文档片段 %d | 文件: %s]\n%s\n\n", i+1, ref.Name, tc.chunk.Content))
+		} else {
+			contextBuilder.WriteString(fmt.Sprintf("[文档片段 %d]\n%s\n\n", i+1, tc.chunk.Content))
+		}
 	}
 	messages = append(messages, chatMessage{
 		Role:    "system",

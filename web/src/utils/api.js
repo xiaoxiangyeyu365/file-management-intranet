@@ -57,6 +57,9 @@ export const fileAPI = {
   lookup: (parentId, name) =>
     api.get('/files/lookup', { params: { parentId, name } }),
   get: (id) => api.get(`/files/${id}`),
+  getAISummary: (id) => api.get(`/files/${id}/ai-summary`),
+  regenerateSummary: (id) => api.post(`/files/${id}/ai-summary`),
+  reindex: (id) => api.post(`/files/${id}/reindex`),
   rename: (id, name) => api.put(`/files/${id}`, { name }),
   delete: (id) => api.delete(`/files/${id}`),
   move: (fileIds, targetFolderId) =>
@@ -133,6 +136,8 @@ export const adminAPI = {
   updateQuota: (id, quota) => api.put(`/admin/users/${id}/quota`, { disk_quota: quota }),
   getSettings: () => api.get('/admin/settings'),
   updateSettings: (data) => api.put('/admin/settings', data),
+  getIndexStats: () => api.get('/admin/ai/index-stats'),
+  reindexAll: () => api.post('/admin/ai/reindex-all'),
   listAuditLogs: (params) => api.get('/admin/audit-logs', { params })
 }
 
@@ -165,7 +170,9 @@ export const chatAPI = {
   deleteConversation: (id) => api.delete(`/chat/conversations/${id}`),
   addFile: (conversationId, fileId) =>
     api.post(`/chat/conversations/${conversationId}/add-file`, { fileId }),
-  ask: (conversationId, question, onToken, onDone, onError) => {
+  removeFile: (conversationId, fileId) =>
+    api.delete(`/chat/conversations/${conversationId}/files/${fileId}`),
+  ask: (conversationId, question, onToken, onDone, onError, signal) => {
     const token = localStorage.getItem('cloudbox_token')
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
     const url = `${baseURL}/chat/conversations/${conversationId}/ask?q=${encodeURIComponent(question)}`
@@ -177,7 +184,8 @@ export const chatAPI = {
         'Accept': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Authorization': token ? `Bearer ${token}` : ''
-      }
+      },
+      signal
     }).then(async (response) => {
       if (!response.ok) {
         const text = await response.text().catch(() => '')
@@ -219,7 +227,8 @@ export const chatAPI = {
         }
       }
     }).catch((err) => {
-      if (!cancelled) onError('请求失败: ' + err.message)
+      if (cancelled || err.name === 'AbortError') return
+      onError('请求失败: ' + err.message)
     })
 
     return { close: () => { cancelled = true } }
